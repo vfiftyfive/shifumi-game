@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"math/rand"
@@ -63,11 +64,10 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Check if this is the first player creating a new session
+	// If the session ID is empty, create a new session for the first player
 	if choice.SessionID == "" {
 		choice.SessionID = generateSessionID()
-		choice.PlayerID = "1" // Assign as Player 1
-		choice.Round = 1      // Start with round 1 for the first choice
+		choice.PlayerID = "1"
 		session := &models.GameSession{
 			SessionID: choice.SessionID,
 			Status:    "in progress",
@@ -92,8 +92,15 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 			return
 		}
 
-		// Set the current round for the player's choice
-		choice.Round = session.Round
+		// Fetch the latest game result to determine the current round
+		currentRound, err := getCurrentRoundFromKafka(session.SessionID, kafkaBroker)
+		if err != nil {
+			log.Printf("[ERROR] Failed to get current round from Kafka: %v", err)
+			http.Error(w, "Failed to determine the current round", http.StatusInternalServerError)
+			return
+		}
+
+		choice.Round = currentRound
 
 		// Enforce blocking: Prevent the same player from submitting a choice until the other player has played
 		if choice.PlayerID == "1" && session.Player1 != nil && session.Round == session.Player1.Round {
@@ -151,4 +158,54 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 	log.Println("[INFO] Response sent to client")
+}
+
+// getCurrentRoundFromKafka fetches the latest game-result message from Kafka to determine the current round.
+func getCurrentRoundFromKafka(sessionID, kafkaBroker string) (int, error) {
+	topic := "game-results"
+	partition := 0
+
+	// Create a Kafka reader configured to read from the specific partition and start at the last offset.
+	reader := kafkago.NewReader(kafkago.ReaderConfig{
+		Brokers:   []string{kafkaBroker},
+		Topic:     topic,
+		Partition: partition,
+	})
+	defer reader.Close()
+
+	// Fetch the last offset
+	lastOffset, err := reader.ReadLag(context.Background())
+	if err != nil {
+		log.Printf(Orange+"[ERROR] Failed to get the last offset: %v"+Reset, err)
+		return 0, err
+	}
+
+	// Seek to the last offset
+	if err := reader.SetOffset(lastOffset - 1); err != nil {
+		log.Printf(Orange+"[ERROR] Failed to set offset: %v"+Reset, err)
+		return 0, err
+	}
+
+	// Read the last message
+	msg, err := reader.ReadMessage(context.Background())
+	if err != nil {
+		log.Printf(Orange+"[ERROR] Failed to read last message from Kafka topic %s: %v"+Reset, topic, err)
+		return 0, err
+	}
+
+	log.Printf(Orange+"[INFO] Read last message from Kafka topic %s: %s"+Reset, topic, string(msg.Value))
+
+	var result models.GameResult
+	if err := json.Unmarshal(msg.Value, &result); err != nil {
+		log.Printf(Orange+"[ERROR] Error unmarshalling game result: %v"+Reset, err)
+		return 0, err
+	}
+
+	if result.SessionID == sessionID {
+		log.Printf(Orange+"[INFO] Matching session ID found: %s. Current round: %d"+Reset, result.SessionID, result.Round)
+		return result.Round, nil
+	}
+
+	log.Printf(Orange+"[INFO] No matching session ID found for %s in the last message", sessionID)
+	return 0, nil
 }
