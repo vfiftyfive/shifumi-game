@@ -2,9 +2,10 @@ package models
 
 type PlayerChoice struct {
 	PlayerID  string `json:"player_id"`
-	Choice    string `json:"choice"`
 	SessionID string `json:"session_id"`
-	Round     int    `json: "round"`
+	Choice    string `json:"choice"`
+	Round     int    `json:"round"`
+	HasPlayed bool   `json:"has_played"`
 }
 
 type GameResult struct {

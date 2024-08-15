@@ -64,10 +64,12 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	mu.Lock()
 	defer mu.Unlock()
 
-	// If the session ID is empty, create a new session for the first player
+	// Check if this is the first player creating a new session
 	if choice.SessionID == "" {
 		choice.SessionID = generateSessionID()
-		choice.PlayerID = "1"
+		choice.PlayerID = "1" // Assign as Player 1
+		choice.Round = 1      // Start with round 1 for the first choice
+		choice.HasPlayed = true
 		session := &models.GameSession{
 			SessionID: choice.SessionID,
 			Status:    "in progress",
@@ -92,41 +94,44 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 			return
 		}
 
-		// Fetch the latest game result to determine the current round
-		currentRound, err := getCurrentRoundFromKafka(session.SessionID, kafkaBroker)
+		// Get the current round from Kafka game-results topic
+		currentRound, err := getCurrentRoundFromKafka(choice.SessionID, kafkaBroker)
 		if err != nil {
 			log.Printf("[ERROR] Failed to get current round from Kafka: %v", err)
-			http.Error(w, "Failed to determine the current round", http.StatusInternalServerError)
+			http.Error(w, "Failed to get current round", http.StatusInternalServerError)
 			return
 		}
 
+		// Set the current round for the player's choice
 		choice.Round = currentRound
 
 		// Enforce blocking: Prevent the same player from submitting a choice until the other player has played
-		if choice.PlayerID == "1" && session.Player1 != nil && session.Round == session.Player1.Round {
-			log.Printf("[ERROR] Player 1 has already submitted a choice for this round in session: %s", choice.SessionID)
-			http.Error(w, "Player 1 has already submitted a choice", http.StatusConflict)
-			return
-		} else if choice.PlayerID == "2" && session.Player2 != nil && session.Round == session.Player2.Round {
-			log.Printf("[ERROR] Player 2 has already submitted a choice for this round in session: %s", choice.SessionID)
-			http.Error(w, "Player 2 has already submitted a choice", http.StatusConflict)
-			return
+		if choice.PlayerID == "1" {
+			if session.Player1 != nil && session.Player1.HasPlayed && session.Round == choice.Round {
+				log.Printf("[ERROR] Player 1 has already submitted a choice for this round in session: %s", choice.SessionID)
+				http.Error(w, "Player 1 has already submitted a choice", http.StatusConflict)
+				return
+			}
+			choice.HasPlayed = true
+			session.Player1 = &choice
+		} else if choice.PlayerID == "2" {
+			if session.Player2 != nil && session.Player2.HasPlayed && session.Round == choice.Round {
+				log.Printf("[ERROR] Player 2 has already submitted a choice for this round in session: %s", choice.SessionID)
+				http.Error(w, "Player 2 has already submitted a choice", http.StatusConflict)
+				return
+			}
+			choice.HasPlayed = true
+			session.Player2 = &choice
 		}
 
-		// Process existing session
-		if session.Player1 == nil {
-			choice.PlayerID = "1"
-			session.Player1 = &choice
-			log.Printf("[INFO] Player 1 assigned to session %s", choice.SessionID)
-		} else if session.Player2 == nil {
-			choice.PlayerID = "2"
-			session.Player2 = &choice
-			log.Printf("[INFO] Player 2 assigned to session %s", choice.SessionID)
-		} else {
-			log.Printf("[WARN] Session %s is full", choice.SessionID)
-			http.Error(w, "Session is full", http.StatusConflict)
-			return
+		// Check if both players have played this round
+		if session.Player1 != nil && session.Player2 != nil && session.Player1.HasPlayed && session.Player2.HasPlayed {
+			// Determine the winner and update the session
+			determineWinner(session, kafkaBroker)
 		}
+
+		// Always update the session
+		updateSession(session, kafkaBroker)
 	}
 
 	// Marshal the PlayerChoice struct into JSON

@@ -56,6 +56,7 @@ func ProcessChoices(kafkaBroker string) {
 	}
 }
 
+// handlePlayerChoice function
 func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	var choice models.PlayerChoice
 	if err := json.Unmarshal(value, &choice); err != nil {
@@ -90,11 +91,9 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 
 	// Record player choices
-	if session.Player1 == nil {
-		choice.PlayerID = "1"
+	if choice.PlayerID == "1" {
 		session.Player1 = &choice
-	} else if session.Player2 == nil {
-		choice.PlayerID = "2"
+	} else if choice.PlayerID == "2" {
 		session.Player2 = &choice
 		determineWinner(session, kafkaBroker) // Only determine winner when both players have made their choices
 	}
