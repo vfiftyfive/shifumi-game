@@ -10,27 +10,32 @@ import (
 )
 
 func main() {
-	// Retrieve the Kafka broker address from the environment variable
 	kafkaBroker := os.Getenv("KAFKA_BROKER")
 	if kafkaBroker == "" {
 		log.Fatal("KAFKA_BROKER environment variable is not set")
 	}
 
-	// Define the Kafka topics to monitor and ensure they exist
+	// Monitor Kafka availability before starting the server
 	topics := []string{"player-choices", "game-results"}
-
-	// Monitor Kafka availability and ensure required topics exist
 	go kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1, 10*time.Second)
 
-	// Start processing player choices
-	go api.ProcessChoices(kafkaBroker)
+	log.Println("[INFO] Starting game logic service setup...")
 
-	// Set up the /stats endpoint to retrieve game statistics
+	// Start processing player choices in a separate goroutine
+	go func() {
+		for {
+			log.Println("[INFO] Attempting to start processing player choices...")
+			api.ProcessChoices(kafkaBroker)
+			log.Println("[WARN] ProcessChoices function exited unexpectedly. Restarting...")
+			time.Sleep(2 * time.Second) // Sleep briefly before restarting to avoid tight loops in case of persistent errors
+		}
+	}()
+
+	// Registering handlers for live stats and historical stats
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		api.GetPlayerStatsHandler(w, r, kafkaBroker)
+		api.StatsHandler(w, r, kafkaBroker)
 	})
 
-	// Start the HTTP server on port 8082
-	log.Println("Starting server on :8082")
-	log.Fatal(http.ListenAndServe(":8082", nil))
+	log.Println("[INFO] Game logic service is running on port 8082")
+	log.Fatal(http.ListenAndServe(":8082", nil)) // Serve on port 8082
 }

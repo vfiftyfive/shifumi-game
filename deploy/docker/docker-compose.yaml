@@ -53,16 +53,6 @@ services:
     networks:
       - kafka-net
 
-      
-  kafka-test:
-    build:
-      context: ../../tests
-      dockerfile: Dockerfile
-    environment:
-      - KAFKA_BROKER=kafka:9092
-    networks:
-      - kafka-net
-
 networks:
   kafka-net:
     driver: bridge

@@ -1,9 +1,10 @@
 package models
 
 type PlayerChoice struct {
-	PlayerID  int    `json:"player_id"`
+	PlayerID  string `json:"player_id"`
 	Choice    string `json:"choice"`
 	SessionID string `json:"session_id"`
+	Round     int    `json: "round"`
 }
 
 type GameResult struct {
@@ -11,6 +12,7 @@ type GameResult struct {
 	Player1Wins int    `json:"player1_wins"`
 	Player2Wins int    `json:"player2_wins"`
 	Draws       int    `json:"draws"`
+	Round       int    `json:"round"`
 	Status      string `json:"status"`
 	Message     string `json:"message"`
 	Player1     string `json:"player1_choice,omitempty"` // Adding player choices to the game result
@@ -24,5 +26,6 @@ type GameSession struct {
 	Player1Wins int
 	Player2Wins int
 	Draws       int
+	Round       int
 	Status      string
 }

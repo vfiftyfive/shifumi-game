@@ -8,19 +8,8 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// Kafka producer and consumer utilities
-
-// NewKafkaWriter creates a new Kafka writer
-func NewKafkaWriter(brokers []string, topic string) *kafka.Writer {
-	return &kafka.Writer{
-		Addr:     kafka.TCP(brokers...),
-		Topic:    topic,
-		Balancer: &kafka.LeastBytes{},
-	}
-}
-
-// WriteMessage writes a message to Kafka
-func WriteMessage(writer *kafka.Writer, key, value []byte) error {
+// WriteMessage writes a message to Kafka using a given writer
+func WriteMessages(writer *kafka.Writer, key, value []byte) error {
 	err := writer.WriteMessages(context.Background(), kafka.Message{
 		Key:   key,
 		Value: value,
@@ -32,16 +21,7 @@ func WriteMessage(writer *kafka.Writer, key, value []byte) error {
 	return nil
 }
 
-// NewKafkaReader creates a new Kafka reader
-func NewKafkaReader(brokers []string, topic, groupID string) *kafka.Reader {
-	return kafka.NewReader(kafka.ReaderConfig{
-		Brokers: brokers,
-		Topic:   topic,
-		GroupID: groupID,
-	})
-}
-
-// ReadMessages reads messages from Kafka and processes them using the provided handler function
+// ReadMessages reads messages from Kafka using a given reader and processes them using the provided handler function
 func ReadMessages(reader *kafka.Reader, handleMessage func(key, value []byte) error) error {
 	for {
 		msg, err := reader.ReadMessage(context.Background())
@@ -94,9 +74,14 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 		}
 
 		// Attempt to connect to Kafka
-		writer := NewKafkaWriter(brokers, topics[0])
+		writer := kafka.NewWriter(kafka.WriterConfig{
+			Brokers:  brokers,
+			Topic:    topics[0],
+			Balancer: &kafka.LeastBytes{},
+		})
 		defer writer.Close()
-		err := WriteMessage(writer, []byte("test-key"), []byte("test-value"))
+
+		err := WriteMessages(writer, []byte("test-key"), []byte("test-value"))
 		if err != nil {
 			// Log the error message every `interval`
 			log.Printf("Failed to connect to Kafka: %v", err)
