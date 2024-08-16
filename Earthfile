@@ -13,9 +13,9 @@ build-client:
   RUN CGO_ENABLED=0 go build -o client cmd/client/main.go
   SAVE ARTIFACT client
 
-# Target to build the game-logic binary
+# Target to build the server binary
 build-server:
-  RUN CGO_ENABLED=0 go build -o server cmd/game-logic/main.go
+  RUN CGO_ENABLED=0 go build -o server cmd/server/main.go
   SAVE ARTIFACT server
 
 # Target to build all binaries
@@ -31,7 +31,7 @@ docker-client:
   CMD ["/app/client"]
   SAVE IMAGE --push vfiftyfive/shifumi-client
 
-# Target to create the final game-logic image
+# Target to create the final server image
 docker-server:
   FROM gcr.io/distroless/static
   WORKDIR /app
