@@ -101,14 +101,17 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 		log.Printf(Green+"[INFO] Both players have played, determining winner | SessionID: %s | Round: %d"+Reset, session.SessionID, session.Round)
 		if err := determineWinner(session, kafkaBroker); err != nil {
 			log.Printf(Red+"[ERROR] Error determining winner | SessionID: %s | Error: %v"+Reset, session.SessionID, err)
+			return err
 		}
 	}
 
 	// Always update the session state
 	if err := updateSession(session, kafkaBroker); err != nil {
 		log.Printf(Orange+"[ERROR] Error updating session | SessionID: %s | Error: %v"+Reset, session.SessionID, err)
+		return err
 	}
 
+	log.Printf(Orange+"[INFO] Session updated successfully | SessionID: %s"+Reset, session.SessionID)
 	return nil
 }
 

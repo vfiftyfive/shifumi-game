@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,8 @@ import (
 	"shifumi-game/pkg/models"
 	"sync"
 	"time"
+
+	kafkago "github.com/segmentio/kafka-go"
 )
 
 var (
@@ -97,6 +100,13 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		session.Player2HasPlayed = true
 	}
 
+	// Publish the player choice to Kafka
+	if err := publishPlayerChoice(choice, kafkaBroker); err != nil {
+		log.Printf("[ERROR] Failed to publish player choice | SessionID: %s | Error: %v", choice.SessionID, err)
+		http.Error(w, "Failed to submit choice", http.StatusInternalServerError)
+		return
+	}
+
 	// After both players have played, process the round and prepare for the next one
 	if session.Player1HasPlayed && session.Player2HasPlayed {
 		log.Printf("[INFO] Both players have played, processing round | SessionID: %s | Round: %d", session.SessionID, session.Round)
@@ -119,4 +129,31 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 	log.Printf("[INFO] Response sent to client | SessionID: %s | PlayerID: %s", choice.SessionID, choice.PlayerID)
+}
+
+func publishPlayerChoice(choice models.PlayerChoice, kafkaBroker string) error {
+	writer := kafkago.NewWriter(kafkago.WriterConfig{
+		Brokers:  []string{kafkaBroker},
+		Topic:    "player-choices",
+		Balancer: &kafkago.LeastBytes{},
+	})
+	defer writer.Close()
+
+	message, err := json.Marshal(choice)
+	if err != nil {
+		log.Printf(Red+"[ERROR] Failed to marshal player choice: %v"+Reset, err)
+		return err
+	}
+
+	err = writer.WriteMessages(context.Background(), kafkago.Message{
+		Key:   []byte(choice.SessionID),
+		Value: message,
+	})
+	if err != nil {
+		log.Printf(Red+"[ERROR] Failed to write player choice to Kafka: %v"+Reset, err)
+		return err
+	}
+
+	log.Printf(Green+"[INFO] Successfully published player choice | SessionID: %s | PlayerID: %s"+Reset, choice.SessionID, choice.PlayerID)
+	return nil
 }

@@ -4,7 +4,6 @@ type PlayerChoice struct {
 	PlayerID  string `json:"player_id"`
 	SessionID string `json:"session_id"`
 	Choice    string `json:"choice"`
-	Round     int    `json:"round"`
 }
 
 type GameSession struct {
