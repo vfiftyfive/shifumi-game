@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -12,6 +11,14 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+)
+
+const (
+	Reset  = "\033[0m"
+	Red    = "\033[31m"
+	Green  = "\033[32m"
+	Yellow = "\033[33m"
+	Orange = "\033[33m"
 )
 
 var (
@@ -42,98 +49,59 @@ func isValidChoice(choice string) bool {
 }
 
 func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
-	log.Println("[INFO] Received request to MakeChoiceHandler")
+	log.Println(Green + "[INFO] Received request to MakeChoiceHandler" + Reset)
 
 	var choice models.PlayerChoice
 	err := json.NewDecoder(r.Body).Decode(&choice)
 	if err != nil {
-		log.Printf("[ERROR] Error decoding player choice: %v", err)
+		log.Printf(Red+"[ERROR] Error decoding player choice: %v"+Reset, err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("[INFO] Player choice received: %v", choice)
+	log.Printf(Green+"[INFO] Player choice received | PlayerID: %s | SessionID: %s | Choice: %s"+Reset, choice.PlayerID, choice.SessionID, choice.Choice)
 
 	// Validate the choice
 	if !isValidChoice(choice.Choice) {
-		log.Printf("[ERROR] Invalid choice received: %s", choice.Choice)
+		log.Printf(Red+"[ERROR] Invalid choice received: %s"+Reset, choice.Choice)
 		http.Error(w, "Invalid choice. Must be rock, paper, or scissors.", http.StatusBadRequest)
 		return
 	}
 
+	// Lock for session management
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Check if the session already exists
 	session, exists := sessions[choice.SessionID]
-	if !exists {
-		choice.SessionID = generateSessionID()
-		choice.PlayerID = "1"
+	if exists {
+		// Ensure PlayerID is specified for existing sessions
+		if choice.PlayerID == "" {
+			log.Printf(Red+"[ERROR] Player ID must be specified for existing session: %s"+Reset, choice.SessionID)
+			http.Error(w, "Player ID must be specified for existing sessions.", http.StatusBadRequest)
+			return
+		}
+	} else {
+		// If session does not exist, create a new one and assign PlayerID if not provided
+		if choice.PlayerID == "" {
+			choice.PlayerID = "1" // Default to Player 1 for new sessions
+		}
 		session = &models.GameSession{
 			SessionID: choice.SessionID,
 			Status:    "in progress",
 			Round:     1,
+			Rounds:    []models.RoundResult{{RoundNumber: 1}}, // Initialize with the first round
 		}
 		sessions[choice.SessionID] = session
-		log.Printf("[INFO] New session created: %s", choice.SessionID)
-	} else {
-		// Check if the game has already ended
-		if session.Status == "finished" || session.Status == "Player 1 wins the game!" || session.Status == "Player 2 wins the game!" {
-			log.Printf("[ERROR] Attempt to play in a finished game session: %s", choice.SessionID)
-			http.Error(w, "Game has already finished", http.StatusConflict)
-			return
-		}
-
-		if choice.PlayerID == "" {
-			// Assign Player 2 ID if Player 1 already exists
-			if session.Player1 != nil {
-				choice.PlayerID = "2"
-			} else {
-				choice.PlayerID = "1"
-			}
-		}
-
-		if (choice.PlayerID == "1" && session.Player1HasPlayed) || (choice.PlayerID == "2" && session.Player2HasPlayed) {
-			log.Printf("[ERROR] Player %s has already submitted a choice for this round in session: %s", choice.PlayerID, choice.SessionID)
-			http.Error(w, fmt.Sprintf("Player %s has already submitted a choice", choice.PlayerID), http.StatusConflict)
-			return
-		}
-	}
-
-	// Record the player's choice
-	if choice.PlayerID == "1" {
-		session.Player1 = &choice
-		session.Player1Choice = choice.Choice
-		session.Player1HasPlayed = true
-	} else if choice.PlayerID == "2" {
-		session.Player2 = &choice
-		session.Player2Choice = choice.Choice
-		session.Player2HasPlayed = true
+		log.Printf(Green+"[INFO] New session created | SessionID: %s | PlayerID: %s"+Reset, session.SessionID, choice.PlayerID)
 	}
 
 	// Publish the player choice to Kafka
 	if err := publishPlayerChoice(choice, kafkaBroker); err != nil {
-		log.Printf("[ERROR] Failed to publish player choice | SessionID: %s | Error: %v", choice.SessionID, err)
+		log.Printf(Red+"[ERROR] Failed to publish player choice | SessionID: %s | PlayerID: %s | Error: %v"+Reset, choice.SessionID, choice.PlayerID, err)
 		http.Error(w, "Failed to submit choice", http.StatusInternalServerError)
 		return
 	}
-
-	// Consolidated logic for when both players have played
-	if session.Player1HasPlayed && session.Player2HasPlayed {
-		determineWinner(session, kafkaBroker) // Determine the winner and update the session once
-
-		session.Round++ // Increment the round after the winner is determined
-		session.Player1HasPlayed = false
-		session.Player2HasPlayed = false
-
-		// If the game is finished, set the status to prevent further play
-		if session.Player1Wins == 3 || session.Player2Wins == 3 {
-			session.Status = "finished"
-			log.Printf("[INFO] Game finished | SessionID: %s", session.SessionID)
-		}
-	}
-
-	// Only update the session once after all processing is complete
-	updateSession(session, kafkaBroker)
 
 	response := map[string]interface{}{
 		"session_id": choice.SessionID,
@@ -144,7 +112,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
-	log.Println("[INFO] Response sent to client")
+	log.Printf(Green+"[INFO] Response sent to client | SessionID: %s | PlayerID: %s"+Reset, choice.SessionID, choice.PlayerID)
 }
 
 func publishPlayerChoice(choice models.PlayerChoice, kafkaBroker string) error {
