@@ -67,7 +67,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	}
 
 	if choice.SessionID == "" {
-		// Case 1: No Session ID provided (First player starts a new session)
+		// Case 1: No Session ID provided (First player starts a new session).
 		if choice.PlayerID != "" {
 			log.Printf("[ERROR] Player ID cannot be provided without a session ID for the first player.")
 			http.Error(w, "Player ID cannot be provided without a session ID for the first player.", http.StatusBadRequest)
@@ -78,7 +78,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		choice.PlayerID = "1"
 		log.Printf("[INFO] New session created | SessionID: %s", choice.SessionID)
 	} else {
-		// Case 2: Session ID is provided
+		// Case 2: Session ID is provided.
 		gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, kafkago.LastOffset)
 		if err != nil {
 			log.Printf("[ERROR] Error retrieving game session: %v", err)
@@ -92,7 +92,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		}
 
 		if choice.PlayerID == "" {
-			// Player 2 joining
+			// Player 2 joining.
 			if !gameSession.HasPlayer2Played() {
 				choice.PlayerID = "2"
 				log.Printf("[INFO] Player 2 joined session | SessionID: %s", choice.SessionID)
@@ -102,7 +102,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 				return
 			}
 		} else {
-			// Case 3: Player ID is provided, validate it
+			// Case 3: Player ID is provided, validate it.
 			playerIDNum, err := strconv.Atoi(choice.PlayerID)
 			if err != nil {
 				log.Printf("[ERROR] Error converting PlayerID %s to integer.", choice.PlayerID)
@@ -114,9 +114,17 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 				http.Error(w, "Invalid PlayerID for session.", http.StatusConflict)
 				return
 			}
+
+			// Check if the player has already played in the current round
+			if (choice.PlayerID == "1" && gameSession.HasPlayer1Played()) ||
+				(choice.PlayerID == "2" && gameSession.HasPlayer2Played()) {
+				log.Printf("[ERROR] Player %s has already played this round | SessionID: %s", choice.PlayerID, choice.SessionID)
+				http.Error(w, "Player has already played this round", http.StatusConflict)
+				return
+			}
 		}
 
-		// Check if the game has already finished
+		// Check if the game has already finished.
 		if gameSession.Status == "finished" {
 			log.Printf("[ERROR] Attempt to play in a finished game session: %s", choice.SessionID)
 			http.Error(w, "Game has already finished", http.StatusConflict)
@@ -124,7 +132,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		}
 	}
 
-	// Publish the player choice to Kafka
+	// Publish the player choice to Kafka.
 	if err := publishPlayerChoice(choice, kafkaBroker); err != nil {
 		log.Printf("[ERROR] Failed to publish player choice | SessionID: %s | Error: %v", choice.SessionID, err)
 		http.Error(w, "Failed to submit choice", http.StatusInternalServerError)

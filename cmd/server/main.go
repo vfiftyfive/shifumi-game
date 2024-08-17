@@ -31,7 +31,7 @@ func main() {
 		}
 	}()
 
-	// Registering handlers for live stats and historical stats
+	// Registering handlers for live stats
 	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 		api.StatsHandler(w, r, kafkaBroker)
 	})

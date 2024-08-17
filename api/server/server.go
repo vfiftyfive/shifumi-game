@@ -3,13 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"shifumi-game/pkg/kafka"
 	"shifumi-game/pkg/models"
 	"strings"
-	"sync"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
@@ -23,11 +21,7 @@ const (
 	Orange = "\033[33m"
 )
 
-var (
-	sessions = make(map[string]*models.GameSession)
-	mu       sync.Mutex
-)
-
+// ProcessChoices listens to the player-choices topic and processes incoming player choices
 func ProcessChoices(kafkaBroker string) {
 	topic := "player-choices"
 	log.Printf(Green+"[INFO] Creating Kafka reader for topic: %s"+Reset, topic)
@@ -63,92 +57,74 @@ func ProcessChoices(kafkaBroker string) {
 	}
 }
 
-// ListenForSessionUpdates listens for session updates on the Kafka topic and updates the local session state
-func ListenForSessionUpdates(kafkaBroker string) {
-	topic := "game-session"
-	log.Printf("[INFO] Creating Kafka consumer for topic: %s", topic)
-
-	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers:  []string{kafkaBroker},
-		Topic:    topic,
-		GroupID:  "client-session-updates",
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
-	})
-	defer reader.Close()
-
-	for {
-		msg, err := reader.ReadMessage(context.Background())
-		if err != nil {
-			log.Printf("[ERROR] Error reading message from Kafka: %v", err)
-			continue
-		}
-
-		var session models.GameSession
-		if err := json.Unmarshal(msg.Value, &session); err != nil {
-			log.Printf("[ERROR] Error unmarshalling session update: %v", err)
-			continue
-		}
-
-		mu.Lock()
-		sessions[session.SessionID] = &session
-		mu.Unlock()
-
-		log.Printf("[INFO] Updated session state | SessionID: %s | Status: %s", session.SessionID, session.Status)
-	}
-}
-
-// handlePlayerChoice function
+// handlePlayerChoice processes each player choice, updating the game session and determining the round winner
 func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	var choice models.PlayerChoice
 	if err := json.Unmarshal(value, &choice); err != nil {
 		log.Printf(Red+"[ERROR] Error unmarshalling player choice | Error: %v"+Reset, err)
 		return err
 	}
-	log.Printf(Green+"[INFO] Successfully unmarshalled player choice | SessionID: %s | PlayerID: %s | Choice: %s"+Reset, choice.SessionID, choice.PlayerID, formatChoice(choice.Choice))
+	log.Printf(Green+"[INFO] Successfully unmarshalled player choice | SessionID: %s | PlayerID: %s | Choice: %s"+Reset, choice.SessionID, choice.PlayerID, choice.Choice)
 
-	// Aggregate choices for this session
-	mu.Lock()
-	defer mu.Unlock()
-
-	session, exists := sessions[choice.SessionID]
-	if !exists {
-		session = &models.GameSession{
-			SessionID: choice.SessionID,
-			Status:    "in progress",
-			Round:     1,
-			Rounds:    []models.RoundResult{{RoundNumber: 1}}, // Initialize with the first round
-		}
-		sessions[choice.SessionID] = session
-		log.Printf(Green+"[INFO] New session created | SessionID: %s"+Reset, session.SessionID)
+	// Retrieve the game session from Kafka
+	gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, kafkago.LastOffset)
+	if err != nil {
+		log.Printf(Red+"[ERROR] Error retrieving game session: %v"+Reset, err)
+		return err
+	}
+	if gameSession == nil {
+		log.Printf(Red+"[ERROR] Session ID does not exist: %s"+Reset, choice.SessionID)
+		return nil
 	}
 
-	// Ensure the Rounds slice has enough capacity
-	if session.Round > len(session.Rounds) {
-		// Add a new round if the current round number exceeds the number of rounds in the slice
-		session.Rounds = append(session.Rounds, models.RoundResult{RoundNumber: session.Round})
-		log.Printf(Green+"[INFO] New round added | RoundNumber: %d | SessionID: %s"+Reset, session.Round, session.SessionID)
+	// Check if the game has already ended
+	if gameSession.Status == "finished" {
+		log.Printf(Red+"[ERROR] Game has already ended for session | SessionID: %s"+Reset, gameSession.SessionID)
+		return nil
 	}
 
-	// Assign the choice to the correct player in the current round
-	currentRound := &session.Rounds[session.Round-1]
+	// Check if the player has already played this round
+	if (choice.PlayerID == "1" && gameSession.HasPlayer1Played()) || (choice.PlayerID == "2" && gameSession.HasPlayer2Played()) {
+		log.Printf(Yellow+"[INFO] Player %s has already played this round | SessionID: %s"+Reset, choice.PlayerID, choice.SessionID)
+		return nil
+	}
+
+	// Record the player's choice
+	currentRound := &gameSession.Rounds[gameSession.CurrentRound-1]
 	if choice.PlayerID == "1" {
 		currentRound.Player1 = &choice
+		gameSession.SetPlayer1HasPlayed(true)
 	} else if choice.PlayerID == "2" {
 		currentRound.Player2 = &choice
+		gameSession.SetPlayer2HasPlayed(true)
 	}
 
-	// Check if both players have played for the current round
-	if currentRound.Player1 != nil && currentRound.Player2 != nil {
-		return determineWinner(session, kafkaBroker)
+	// If both players have played, determine the winner
+	if gameSession.HasPlayer1Played() && gameSession.HasPlayer2Played() {
+		determineWinner(gameSession)
+
+		// Prepare for the next round
+		gameSession.CurrentRound++
+		gameSession.Rounds = append(gameSession.Rounds, models.RoundResult{
+			RoundNumber: gameSession.CurrentRound,
+		})
+		gameSession.SetPlayer1HasPlayed(false)
+		gameSession.SetPlayer2HasPlayed(false)
 	}
 
+	// Publish the updated game session to Kafka
+	if err := updateSession(gameSession, kafkaBroker); err != nil {
+		log.Printf(Orange+"[ERROR] Error updating session | SessionID: %s | Error: %v"+Reset, gameSession.SessionID, err)
+	}
+
+	log.Printf(Orange+"[INFO] Session updated successfully | SessionID: %s"+Reset, gameSession.SessionID)
 	return nil
 }
 
+// updateSession publishes the updated game session to the Kafka game-results topic
 func updateSession(session *models.GameSession, kafkaBroker string) error {
-	topic := "game-session"
-	log.Printf(Orange+"[INFO] Updating session | SessionID: %s | Round: %d"+Reset, session.SessionID, session.Round)
+	topic := "game-results"
+	log.Printf(Orange+"[INFO] Updating session | SessionID: %s"+Reset, session.SessionID)
 
 	writer := kafkago.NewWriter(kafkago.WriterConfig{
 		Brokers:  []string{kafkaBroker},
@@ -174,13 +150,10 @@ func updateSession(session *models.GameSession, kafkaBroker string) error {
 	return nil
 }
 
-func determineWinner(session *models.GameSession, kafkaBroker string) error {
-	currentRound := &session.Rounds[session.Round-1]
+// determineWinner determines the winner of the current round and updates the game session accordingly
+func determineWinner(session *models.GameSession) {
+	currentRound := &session.Rounds[session.CurrentRound-1]
 	var result string
-
-	if currentRound.Player1 == nil || currentRound.Player2 == nil {
-		return fmt.Errorf("incomplete round data: one or both player choices are missing")
-	}
 
 	switch currentRound.Player1.Choice {
 	case "rock":
@@ -222,37 +195,27 @@ func determineWinner(session *models.GameSession, kafkaBroker string) error {
 	}
 
 	currentRound.Result = result
-	session.Round++
+	log.Printf(Green+"[INFO] %s | SessionID: %s | Round: %d"+Reset, result, session.SessionID, session.CurrentRound)
 
-	log.Printf(Green+"[INFO] %s | SessionID: %s | Round: %d"+Reset, result, session.SessionID, session.Round-1)
-
+	// Check if the game has finished
 	if session.Player1Wins == 3 || session.Player2Wins == 3 {
 		session.Status = "finished"
-		log.Printf(Red+"[INFO] Game over. %s"+Reset, session.Status)
-	}
-
-	return updateSession(session, kafkaBroker)
-}
-
-func formatChoice(choice string) string {
-	switch choice {
-	case "rock":
-		return "🪨"
-	case "paper":
-		return "📄"
-	case "scissors":
-		return "X"
-	default:
-		return choice
+		if session.Player1Wins == 3 {
+			session.SetWinner("Player 1")
+		} else {
+			session.SetWinner("Player 2")
+		}
+		log.Printf(Red+"[INFO] Game over | SessionID: %s | Winner: %s 🥇"+Reset, session.SessionID, session.GetWinner())
 	}
 }
 
+// StatsHandler handles the /stats API endpoint and streams the game results to the client
 func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	log.Println(Green + "[INFO] Received request to LiveStatsHandler" + Reset)
 
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  []string{kafkaBroker},
-		Topic:    "game-session",
+		Topic:    "game-results",
 		GroupID:  "live-stats-consumer",
 		MinBytes: 10e3, // 10KB
 		MaxBytes: 10e6, // 10MB
@@ -276,7 +239,7 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 			continue
 		}
 
-		log.Printf(Green+"[INFO] Live game session | SessionID: %s | Round: %d | Status: %s"+Reset, session.SessionID, session.Round-1, session.Status)
+		log.Printf(Green+"[INFO] Live game session: %v"+Reset, session)
 		encoder.Encode(session)  // Stream each session result as it arrives
 		w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
 	}
