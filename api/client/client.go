@@ -1,4 +1,4 @@
-package api
+package client
 
 import (
 	"context"
@@ -6,8 +6,9 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"shifumi-game/pkg/kafka"
 	"shifumi-game/pkg/models"
-	"sync"
+	"strconv"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
@@ -19,11 +20,6 @@ const (
 	Green  = "\033[32m"
 	Yellow = "\033[33m"
 	Orange = "\033[33m"
-)
-
-var (
-	sessions = make(map[string]*models.GameSession)
-	mu       sync.Mutex
 )
 
 func init() {
@@ -48,9 +44,11 @@ func isValidChoice(choice string) bool {
 	return validChoices[choice]
 }
 
+// MakechoiceHandler handles player choices and serves the /play api endpoint
 func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	log.Println(Green + "[INFO] Received request to MakeChoiceHandler" + Reset)
 
+	// Create a PlayerChoice struct and unmarshall request body into it
 	var choice models.PlayerChoice
 	err := json.NewDecoder(r.Body).Decode(&choice)
 	if err != nil {
@@ -68,51 +66,92 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		return
 	}
 
-	// Lock for session management
-	mu.Lock()
-	defer mu.Unlock()
+	// If no session ID is provided, allocate a new session ID if no player ID is provided, else return an error.
+	// If a session ID is provided without a player ID this is player 2 joining.
+	// If there's already a player 2, session is full.
+	// Session ID cannot be provided by the first player joining the game.
+	// Player 2 must provide a session ID.
 
-	// Check if the session already exists
-	session, exists := sessions[choice.SessionID]
-	if exists {
-		// Ensure PlayerID is specified for existing sessions
-		if choice.PlayerID == "" {
-			log.Printf(Red+"[ERROR] Player ID must be specified for existing session: %s"+Reset, choice.SessionID)
-			http.Error(w, "Player ID must be specified for existing sessions.", http.StatusBadRequest)
+	// Case 1: No session ID is provided
+	if choice.SessionID == "" {
+		if choice.PlayerID != "" {
+			log.Printf("[ERROR] Player ID cannot be provided without a session ID for the first player.")
+			http.Error(w, "Player ID cannot be provided without a session ID for the first player.", http.StatusBadRequest)
 			return
 		}
+		// Allocate a new session ID and set Player ID to "1".
+		choice.SessionID = generateSessionID()
+		choice.PlayerID = "1"
+		log.Printf("[INFO] New session created | SessionID: %s", choice.SessionID)
 	} else {
-		// If session does not exist, create a new one and assign PlayerID if not provided
+		// Case 2: Session ID is set.
+		// Retrieve the session ID from the first kafka message in the game-session topic.
+		gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, kafkago.LastOffset)
+		if err != nil {
+			log.Printf("[ERROR] Error retrieving game session: %v", err)
+			http.Error(w, "Error retrieving game session", http.StatusInternalServerError)
+			return
+		}
+		if gameSession == nil {
+			log.Printf("[ERROR] Session ID does not exist or game has not started yet.")
+			http.Error(w, "Session ID does not exist or game has not started yet.", http.StatusBadRequest)
+			return
+		}
+
+		// If PlayerID is not set and session is not full, set Player ID to "2".
 		if choice.PlayerID == "" {
-			choice.PlayerID = "1" // Default to Player 1 for new sessions
+			if !gameSession.HasPlayer2Played() {
+				choice.PlayerID = "2"
+				log.Printf("[INFO] Player 2 joined session | SessionID: %s", choice.SessionID)
+			} else {
+				log.Printf("[ERROR] Session is full; Player 2 has already joined.")
+				http.Error(w, "Session is full; Player 2 has already joined.", http.StatusConflict)
+				return
+			}
+		} else {
+			// Case 3: Player ID is provided.
+			// Validate the player ID.
+			PlayerIDNum, err := strconv.Atoi(choice.PlayerID)
+			if err != nil {
+				log.Printf("[ERROR] Error converting %s to Integer.", choice.PlayerID)
+				http.Error(w, "Error retrieving game session", http.StatusInternalServerError)
+				return
+			}
+			if PlayerIDNum > models.MaxPlayers {
+				log.Printf("[ERROR] Invalid PlayerID for session.")
+				http.Error(w, "Invalid PlayerID for session.", http.StatusConflict)
+				return
+			}
 		}
-		session = &models.GameSession{
-			SessionID: choice.SessionID,
-			Status:    "in progress",
-			Round:     1,
-			Rounds:    []models.RoundResult{{RoundNumber: 1}}, // Initialize with the first round
+
+		// Check if the game has already finished
+		if gameSession.Status == "finished" {
+			log.Printf("[ERROR] Attempt to play in a finished game session: %s", choice.SessionID)
+			http.Error(w, "Game has already finished", http.StatusConflict)
+			return
 		}
-		sessions[choice.SessionID] = session
-		log.Printf(Green+"[INFO] New session created | SessionID: %s | PlayerID: %s"+Reset, session.SessionID, choice.PlayerID)
-	}
 
-	// Publish the player choice to Kafka
-	if err := publishPlayerChoice(choice, kafkaBroker); err != nil {
-		log.Printf(Red+"[ERROR] Failed to publish player choice | SessionID: %s | PlayerID: %s | Error: %v"+Reset, choice.SessionID, choice.PlayerID, err)
-		http.Error(w, "Failed to submit choice", http.StatusInternalServerError)
-		return
-	}
+		// Publish the player choice to Kafka
+		if err := publishPlayerChoice(choice, kafkaBroker); err != nil {
+			log.Printf("[ERROR] Failed to publish player choice | SessionID: %s | Error: %v", choice.SessionID, err)
+			http.Error(w, "Failed to submit choice", http.StatusInternalServerError)
+			return
+		}
 
-	response := map[string]interface{}{
-		"session_id": choice.SessionID,
-		"player_id":  choice.PlayerID,
-		"status":     "Choice submitted successfully",
-	}
+		// Craft the response to the client
+		response := map[string]interface{}{
+			"session_id": choice.SessionID,
+			"player_id":  choice.PlayerID,
+			"status":     "Choice submitted successfully",
+		}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
-	log.Printf(Green+"[INFO] Response sent to client | SessionID: %s | PlayerID: %s"+Reset, choice.SessionID, choice.PlayerID)
+		// Send the response to the client
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(response)
+		log.Println("[INFO] Response sent to client")
+
+	}
 }
 
 func publishPlayerChoice(choice models.PlayerChoice, kafkaBroker string) error {

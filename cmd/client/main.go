@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"shifumi-game/api"
+	api "shifumi-game/api/client"
 )
 
 func main() {

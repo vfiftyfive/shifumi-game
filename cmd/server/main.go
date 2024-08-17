@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"shifumi-game/api"
+	api "shifumi-game/api/server"
 	"shifumi-game/pkg/kafka"
 	"time"
 )
@@ -16,7 +16,7 @@ func main() {
 	}
 
 	// Monitor Kafka availability before starting the server
-	topics := []string{"player-choices", "game-results"}
+	topics := []string{"player-choices", "game-sessions"}
 	go kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1, 10*time.Second)
 
 	log.Println("[INFO] Starting game logic service setup...")

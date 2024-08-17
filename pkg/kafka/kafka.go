@@ -2,7 +2,11 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
+	"shifumi-game/pkg/models"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -95,6 +99,54 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 		time.Sleep(backoff)
 		if backoff < 2*time.Minute {
 			backoff *= 2
+		}
+	}
+}
+
+// ReadGameSession reads a GameSession from Kafka based on the sessionID and the specified offset.
+func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*models.GameSession, error) {
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{kafkaBroker},
+		Topic:    "game-session",
+		GroupID:  "game-session-reader",
+		MinBytes: 1,    // Fetch even the smallest message
+		MaxBytes: 10e6, // Allow fetching large messages
+	})
+
+	defer reader.Close()
+
+	// Seek to the specified offset
+	err := reader.SetOffset(offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set offset: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for {
+		msg, err := reader.ReadMessage(ctx)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, nil // No message found within the timeout
+			}
+			return nil, fmt.Errorf("error reading message: %w", err)
+		}
+
+		var gameSession models.GameSession
+		if err := json.Unmarshal(msg.Value, &gameSession); err != nil {
+			return nil, fmt.Errorf("error unmarshalling message: %w", err)
+		}
+
+		// Ensure the message is for the correct session
+		if gameSession.SessionID == sessionID {
+			return &gameSession, nil
+		}
+
+		// If we've reached the beginning of the partition and haven't found the session,
+		// it likely doesn't exist.
+		if msg.Offset == 0 {
+			return nil, nil
 		}
 	}
 }

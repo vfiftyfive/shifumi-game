@@ -2,10 +2,7 @@ module shifumi-game
 
 go 1.21.6
 
-require (
-	github.com/confluentinc/confluent-kafka-go v1.9.2
-	github.com/segmentio/kafka-go v0.4.47
-)
+require github.com/segmentio/kafka-go v0.4.47
 
 require (
 	github.com/klauspost/compress v1.15.9 // indirect

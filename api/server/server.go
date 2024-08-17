@@ -1,4 +1,4 @@
-package api
+package server
 
 import (
 	"context"
@@ -9,9 +9,23 @@ import (
 	"shifumi-game/pkg/kafka"
 	"shifumi-game/pkg/models"
 	"strings"
+	"sync"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+)
+
+const (
+	Reset  = "\033[0m"
+	Red    = "\033[31m"
+	Green  = "\033[32m"
+	Yellow = "\033[33m"
+	Orange = "\033[33m"
+)
+
+var (
+	sessions = make(map[string]*models.GameSession)
+	mu       sync.Mutex
 )
 
 func ProcessChoices(kafkaBroker string) {
@@ -46,6 +60,41 @@ func ProcessChoices(kafkaBroker string) {
 			log.Printf(Red+"[ERROR] Error reading messages from topic %s: %v"+Reset, topic, err)
 			time.Sleep(2 * time.Second)
 		}
+	}
+}
+
+// ListenForSessionUpdates listens for session updates on the Kafka topic and updates the local session state
+func ListenForSessionUpdates(kafkaBroker string) {
+	topic := "game-session"
+	log.Printf("[INFO] Creating Kafka consumer for topic: %s", topic)
+
+	reader := kafkago.NewReader(kafkago.ReaderConfig{
+		Brokers:  []string{kafkaBroker},
+		Topic:    topic,
+		GroupID:  "client-session-updates",
+		MinBytes: 10e3, // 10KB
+		MaxBytes: 10e6, // 10MB
+	})
+	defer reader.Close()
+
+	for {
+		msg, err := reader.ReadMessage(context.Background())
+		if err != nil {
+			log.Printf("[ERROR] Error reading message from Kafka: %v", err)
+			continue
+		}
+
+		var session models.GameSession
+		if err := json.Unmarshal(msg.Value, &session); err != nil {
+			log.Printf("[ERROR] Error unmarshalling session update: %v", err)
+			continue
+		}
+
+		mu.Lock()
+		sessions[session.SessionID] = &session
+		mu.Unlock()
+
+		log.Printf("[INFO] Updated session state | SessionID: %s | Status: %s", session.SessionID, session.Status)
 	}
 }
 
@@ -98,7 +147,7 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 }
 
 func updateSession(session *models.GameSession, kafkaBroker string) error {
-	topic := "game-results"
+	topic := "game-session"
 	log.Printf(Orange+"[INFO] Updating session | SessionID: %s | Round: %d"+Reset, session.SessionID, session.Round)
 
 	writer := kafkago.NewWriter(kafkago.WriterConfig{
@@ -203,7 +252,7 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  []string{kafkaBroker},
-		Topic:    "game-results",
+		Topic:    "game-session",
 		GroupID:  "live-stats-consumer",
 		MinBytes: 10e3, // 10KB
 		MaxBytes: 10e6, // 10MB
