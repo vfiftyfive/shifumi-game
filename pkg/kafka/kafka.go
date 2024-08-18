@@ -103,12 +103,15 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 	}
 }
 
-// ReadGameSession reads a GameSession from Kafka based on the sessionID and the specified offset.
+// ReadGameSession reads a GameSession from Kafka based on the sessionID.
+// It assumes you're NOT using a consumer group.
+// The `offset` parameter controls which message to read:
+//   - kafka.FirstOffset: Reads the first message in the topic.
+//   - kafka.LastOffset:  Reads the last message in the topic.
 func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*models.GameSession, error) {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{kafkaBroker},
 		Topic:    "game-session",
-		GroupID:  "game-session-reader",
 		MinBytes: 1,    // Fetch even the smallest message
 		MaxBytes: 10e6, // Allow fetching large messages
 	})

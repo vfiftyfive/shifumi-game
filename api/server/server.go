@@ -66,27 +66,17 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 	log.Printf(Green+"[INFO] Successfully unmarshalled player choice | SessionID: %s | PlayerID: %s | Choice: %s"+Reset, choice.SessionID, choice.PlayerID, choice.Choice)
 
-	// Retrieve the game session from Kafka
+	// Retrieve the game session from Kafka or initialize a new session if it doesn't exist
 	gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, kafkago.LastOffset)
 	if err != nil {
 		log.Printf(Red+"[ERROR] Error retrieving game session: %v"+Reset, err)
 		return err
 	}
+
 	if gameSession == nil {
-		log.Printf(Red+"[ERROR] Session ID does not exist: %s"+Reset, choice.SessionID)
-		return nil
-	}
-
-	// Check if the game has already ended
-	if gameSession.Status == "finished" {
-		log.Printf(Red+"[ERROR] Game has already ended for session | SessionID: %s"+Reset, gameSession.SessionID)
-		return nil
-	}
-
-	// Check if the player has already played this round
-	if (choice.PlayerID == "1" && gameSession.HasPlayer1Played()) || (choice.PlayerID == "2" && gameSession.HasPlayer2Played()) {
-		log.Printf(Yellow+"[INFO] Player %s has already played this round | SessionID: %s"+Reset, choice.PlayerID, choice.SessionID)
-		return nil
+		// Initialize a new game session for the first player
+		gameSession = models.NewGameSession(choice.SessionID)
+		log.Printf(Green+"[INFO] New game session created | SessionID: %s"+Reset, choice.SessionID)
 	}
 
 	// Record the player's choice
@@ -211,7 +201,7 @@ func determineWinner(session *models.GameSession) {
 
 // StatsHandler handles the /stats API endpoint and streams the game results to the client
 func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
-	log.Println(Green + "[INFO] Received request to LiveStatsHandler" + Reset)
+	log.Println(Green + "[INFO] Received request to StatsHandler" + Reset)
 
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  []string{kafkaBroker},
