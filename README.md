@@ -4,8 +4,8 @@ Welcome to the Shifumi Game! This is a simple implementation of the classic Rock
 
 ## How to Play 🎮
 
-1. **Launch the Game**: 
-   First, ensure you have Docker installed and running. Then, use the following command to start the game using `docker-compose`:
+1. **Launch the Game**:
+   First, ensure you have Docker docker-compose installed and running. Then, use the following command to start the game using `docker-compose`:
 
    ```
    docker-compose up -d
@@ -79,11 +79,33 @@ Welcome to the Shifumi Game! This is a simple implementation of the classic Rock
    {
      "session_id": "LKiRsa35Ov",
      "player_id": "1",
-     "status": "Game over. Player 1 wins!"
+     "status": "Choice submitted successfully"
    }
    ```
 
-   This response indicates that Player 1 has won the game by winning three rounds.
+You can check on /stats to see that the game has been won by player 1 or in the server logs. Alternatively, if you're trying to play again, the server will display the following message: "Game has already finished. Player 1 won!"
+
+## 🧠 Game Logic
+
+The game operates on a simple turn-based system where two players make their choices in each round. Once both players have submitted their choices, the server determines the winner based on the classic rock-paper-scissors rules.
+
+### 🛠 Workflow Description
+
+1. **Player 1 Initiates the Game:**
+   - Player 1 sends a request to `/play` with a move (e.g., `rock`).
+   - The client service generates a session ID, allocates Player ID `1`, and publishes the move to the Kafka `player-choices` topic.
+
+2. **Player 2 Joins the Game:**
+   - Player 2 sends a request to `/play` with the session ID.
+   - The client service allocates Player ID `2` and publishes the move to the Kafka `player-choices` topic.
+
+3. **Server Processes the Choices:**
+   - The server service listens to the `player-choices` topic.
+   - When both players have submitted their moves, the server determines the winner and publishes the result to the Kafka `game-results` topic.
+
+4. **Check Game Status:**
+   - The client or any interested party can check the game status by querying the `/stats` endpoint.
+   - The stats are read from the Kafka `game-results` topic.
 
 ## Project Structure 🏗️
 
@@ -91,11 +113,28 @@ Welcome to the Shifumi Game! This is a simple implementation of the classic Rock
 - **api/server/**: Contains the server-side code that handles game logic.
 - **cmd/server/**: The entry point for the server application.
 
+## 🏛️ Architecture
+
+The Shifumi Game is composed of the following components:
+
+- **Client Service:** This service handles player interactions. Players make their moves by sending HTTP requests to the `/play` endpoint. The client service generates session IDs, allocates player IDs, writes to the Kafka `player-choices` topic, and reads from the Kafka `game-results` topic to retrieve the game state.
+
+- **Server Service:** The server is responsible for the game logic. It processes player moves by reading the Kafka `player-choices` topic, determining the round winner, and writing the results to the Kafka `game-results` topic. It also provides a `/stats` endpoint to monitor the game state in real-time.
+
+- **Kafka:** Kafka acts as the messaging backbone for the game, facilitating communication between the client and server services. It ensures that player moves and game results are consistently and reliably transmitted.
+
+### Client logic
+
+![](assets/mermaid.png)
+
+### Notes on Scalability
+
+This application is a demonstration of asynchronous microservices using Kafka. It is not designed for scalability or production use but serves as a fun and educational example of how microservices can be orchestrated using Kafka as a streaming messaging system.
+
 ## License 📄
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing 🤝
 
 Feel free to open issues or submit pull requests if you have any ideas or improvements!
-
