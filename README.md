@@ -8,6 +8,7 @@ Welcome to the Shifumi Game! This is a simple implementation of the classic Rock
    First, ensure you have Docker docker-compose installed and running. Then, use the following command to start the game using `docker-compose`:
 
    ```
+   cd deploy/docker
    docker-compose up -d
    ```
 
