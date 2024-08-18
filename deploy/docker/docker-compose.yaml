@@ -22,6 +22,16 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+       # Optimization settings
+      KAFKA_LINGER_MS: 5                                # Low latency message batching
+      KAFKA_COMPRESSION_TYPE: gzip                      # Compress messages to reduce size
+      KAFKA_NUM_IO_THREADS: 8                           # Increase IO threads for better throughput
+      KAFKA_SOCKET_SEND_BUFFER_BYTES: 102400            # Increase send buffer size
+      KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 102400         # Increase receive buffer size
+      KAFKA_REPLICA_SOCKET_TIMEOUT_MS: 30000            # Increase socket timeout for replicas
+      KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 10000          # Reduce the interval between log flushes
+      KAFKA_LOG_RETENTION_HOURS: 24                     # Retain logs for 24 hours
+      KAFKA_MESSAGE_MAX_BYTES: 10485760                 # Max message size to 10MB (adjust if needed)
     networks:
       - kafka-net
 

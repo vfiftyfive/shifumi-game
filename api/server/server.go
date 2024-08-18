@@ -1,13 +1,13 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"shifumi-game/pkg/kafka"
 	"shifumi-game/pkg/models"
 	"strings"
+	"sync"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
@@ -20,6 +20,8 @@ const (
 	Yellow = "\033[33m"
 	Orange = "\033[33m"
 )
+
+var mu sync.Mutex
 
 // ProcessChoices listens to the player-choices topic and processes incoming player choices
 func ProcessChoices(kafkaBroker string) {
@@ -59,6 +61,8 @@ func ProcessChoices(kafkaBroker string) {
 
 // handlePlayerChoice processes each player choice, updating the game session and determining the round winner
 func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
+	mu.Lock()         // Lock the mutex
+	defer mu.Unlock() // Ensure the mutex is unlocked when function exits
 	var choice models.PlayerChoice
 	if err := json.Unmarshal(value, &choice); err != nil {
 		log.Printf(Red+"[ERROR] Error unmarshalling player choice | Error: %v"+Reset, err)
@@ -66,17 +70,18 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 	log.Printf(Green+"[INFO] Successfully unmarshalled player choice | SessionID: %s | PlayerID: %s | Choice: %s"+Reset, choice.SessionID, choice.PlayerID, choice.Choice)
 
-	// Retrieve the game session from Kafka or initialize a new session if it doesn't exist
-	gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, kafkago.LastOffset)
-	if err != nil {
-		log.Printf(Red+"[ERROR] Error retrieving game session: %v"+Reset, err)
-		return err
-	}
+	var gameSession *models.GameSession
+	var err error
 
-	if gameSession == nil {
-		// Initialize a new game session for the first player
+	if choice.InitSession {
 		gameSession = models.NewGameSession(choice.SessionID)
 		log.Printf(Green+"[INFO] New game session created | SessionID: %s"+Reset, choice.SessionID)
+	} else {
+		gameSession, err = kafka.ReadGameSession(choice.SessionID, kafkaBroker, "server")
+		if err != nil {
+			log.Printf(Red+"[ERROR] Error retrieving game session: %v"+Reset, err)
+			return err
+		}
 	}
 
 	// Record the player's choice
@@ -84,14 +89,25 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	if choice.PlayerID == "1" {
 		currentRound.Player1 = &choice
 		gameSession.SetPlayer1HasPlayed(true)
+		log.Printf(Yellow+"[INFO] Player 1 has played | SessionID: %s"+Reset, choice.SessionID)
+
 	} else if choice.PlayerID == "2" {
 		currentRound.Player2 = &choice
 		gameSession.SetPlayer2HasPlayed(true)
+		log.Printf(Yellow+"[INFO] Player 2 has played | SessionID: %s"+Reset, choice.SessionID)
 	}
+
+	// Before determining the winner, log the current state
+	log.Printf(Green+"[INFO] Before determining winner | Round: %d | Player 1 Played: %t | Player 2 Played: %t"+Reset,
+		gameSession.CurrentRound, gameSession.HasPlayer1Played(), gameSession.HasPlayer2Played())
 
 	// If both players have played, determine the winner
 	if gameSession.HasPlayer1Played() && gameSession.HasPlayer2Played() {
+		log.Printf(Green+"[INFO] Both players have played | SessionID: %s | Round: %d"+Reset, gameSession.SessionID, gameSession.CurrentRound)
 		determineWinner(gameSession)
+
+		// Log before incrementing the round
+		log.Printf(Green+"[INFO] Incrementing round | SessionID: %s | Current Round: %d"+Reset, gameSession.SessionID, gameSession.CurrentRound)
 
 		// Prepare for the next round
 		gameSession.CurrentRound++
@@ -103,40 +119,10 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 
 	// Publish the updated game session to Kafka
-	if err := updateSession(gameSession, kafkaBroker); err != nil {
+	if err := kafka.UpdateSession(gameSession, kafkaBroker); err != nil {
 		log.Printf(Orange+"[ERROR] Error updating session | SessionID: %s | Error: %v"+Reset, gameSession.SessionID, err)
 	}
 
-	log.Printf(Orange+"[INFO] Session updated successfully | SessionID: %s"+Reset, gameSession.SessionID)
-	return nil
-}
-
-// updateSession publishes the updated game session to the Kafka game-results topic
-func updateSession(session *models.GameSession, kafkaBroker string) error {
-	topic := "game-results"
-	log.Printf(Orange+"[INFO] Updating session | SessionID: %s"+Reset, session.SessionID)
-
-	writer := kafkago.NewWriter(kafkago.WriterConfig{
-		Brokers:  []string{kafkaBroker},
-		Topic:    topic,
-		Balancer: &kafkago.LeastBytes{},
-	})
-	defer writer.Close()
-
-	sessionBytes, err := json.Marshal(session)
-	if err != nil {
-		log.Printf(Red+"[ERROR] Failed to marshal session | SessionID: %s | Error: %v"+Reset, session.SessionID, err)
-		return err
-	}
-
-	if err := writer.WriteMessages(context.Background(), kafkago.Message{
-		Key:   []byte(session.SessionID),
-		Value: sessionBytes,
-	}); err != nil {
-		log.Printf(Orange+"[ERROR] Failed to write message to Kafka topic %s | SessionID: %s | Error: %v"+Reset, topic, session.SessionID, err)
-		return err
-	}
-	log.Printf(Orange+"[INFO] Successfully wrote session update to Kafka topic | SessionID: %s"+Reset, session.SessionID)
 	return nil
 }
 

@@ -3,9 +3,10 @@ package models
 const MaxPlayers = 2
 
 type PlayerChoice struct {
-	PlayerID  string `json:"player_id"`
-	SessionID string `json:"session_id"`
-	Choice    string `json:"choice"`
+	PlayerID    string `json:"player_id"`
+	SessionID   string `json:"session_id"`
+	Choice      string `json:"choice"`
+	InitSession bool   `json:"init_session"`
 }
 
 type RoundResult struct {
@@ -19,8 +20,8 @@ type GameSession struct {
 	SessionID        string        `json:"session_id"`
 	Status           string        `json:"status"`
 	CurrentRound     int           `json:"round"`
-	player1HasPlayed bool          `json:"-"`
-	player2HasPlayed bool          `json:"-"`
+	Player1HasPlayed bool          `json:"player_1_has_played"`
+	Player2HasPlayed bool          `json:"player_2_has_played"`
 	Rounds           []RoundResult `json:"rounds"`
 	Player1Wins      int           `json:"player1_wins"`
 	Player2Wins      int           `json:"player2_wins"`
@@ -45,27 +46,27 @@ func NewGameSession(sessionID string) *GameSession {
 		Status:           "in progress",
 		Rounds:           []RoundResult{{RoundNumber: 1}},
 		CurrentRound:     1,
-		player1HasPlayed: false,
-		player2HasPlayed: false,
+		Player1HasPlayed: false,
+		Player2HasPlayed: false,
 	}
 }
 
 // HasPlayer1Played returns whether Player 1 has played this round
 func (s *GameSession) HasPlayer1Played() bool {
-	return s.player1HasPlayed
+	return s.Player1HasPlayed
 }
 
 // SetPlayer1HasPlayed sets whether Player 1 has played this round
 func (s *GameSession) SetPlayer1HasPlayed(hasPlayed bool) {
-	s.player1HasPlayed = hasPlayed
+	s.Player1HasPlayed = hasPlayed
 }
 
 // HasPlayer2Played returns whether Player 2 has played this round
 func (s *GameSession) HasPlayer2Played() bool {
-	return s.player2HasPlayed
+	return s.Player2HasPlayed
 }
 
 // SetPlayer2HasPlayed sets whether Player 2 has played this round
 func (s *GameSession) SetPlayer2HasPlayed(hasPlayed bool) {
-	s.player2HasPlayed = hasPlayed
+	s.Player2HasPlayed = hasPlayed
 }

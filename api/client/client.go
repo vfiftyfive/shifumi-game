@@ -76,17 +76,18 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		// Allocate a new session ID and set Player ID to "1".
 		choice.SessionID = generateSessionID()
 		choice.PlayerID = "1"
+		choice.InitSession = true
 		log.Printf("[INFO] New session created | SessionID: %s", choice.SessionID)
 	} else {
 		// Case 2: Session ID is provided.
-		gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, kafkago.LastOffset)
+		gameSession, err := kafka.ReadGameSession(choice.SessionID, kafkaBroker, "client-reader")
 		if err != nil {
 			log.Printf("[ERROR] Error retrieving game session: %v", err)
 			http.Error(w, "Error retrieving game session", http.StatusInternalServerError)
 			return
 		}
 		if gameSession == nil {
-			log.Printf("[ERROR] Session ID does not exist or game has not started yet.")
+			log.Printf("[ERROR] Session ID does not exist, or the server is busy processing another player's choice.")
 			http.Error(w, "Session ID does not exist or game has not started yet.", http.StatusBadRequest)
 			return
 		}
@@ -118,7 +119,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 			// Check if the player has already played in the current round
 			if (choice.PlayerID == "1" && gameSession.HasPlayer1Played()) ||
 				(choice.PlayerID == "2" && gameSession.HasPlayer2Played()) {
-				log.Printf("[ERROR] Player %s has already played this round | SessionID: %s", choice.PlayerID, choice.SessionID)
+				log.Printf(Red+"[ERROR] Player %s has already played this round | SessionID: %s", choice.PlayerID, choice.SessionID)
 				http.Error(w, "Player has already played this round", http.StatusConflict)
 				return
 			}

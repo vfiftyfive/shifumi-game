@@ -16,7 +16,7 @@ func main() {
 	}
 
 	// Monitor Kafka availability before starting the server
-	topics := []string{"player-choices", "game-sessions"}
+	topics := []string{"player-choices", "game-results"}
 	go kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1, 10*time.Second)
 
 	log.Println("[INFO] Starting game logic service setup...")

@@ -69,6 +69,7 @@ func CreateKafkaTopic(brokers []string, topic string, partitions, replicationFac
 	return nil
 }
 
+// MonitorKafkaAvailability ensure that topic is available
 func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, replicationFactor int, interval time.Duration) {
 	backoff := interval
 
@@ -116,23 +117,20 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 // The `offset` parameter controls which message to read:
 //   - kafka.FirstOffset: Reads the first message in the topic.
 //   - kafka.LastOffset:  Reads the last message in the topic.
-func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*models.GameSession, error) {
+func ReadGameSession(sessionID string, kafkaBroker string, prefix string) (*models.GameSession, error) {
+	// Build different consumer group for client/server per sessionID
+	groupID := prefix + "-game-session-group-" + sessionID
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  []string{kafkaBroker},
-		Topic:    "game-session",
-		GroupID:  "game-session-reader",
-		MinBytes: 1,    // Fetch even the smallest message
-		MaxBytes: 10e6, // Allow fetching large messages
+		Brokers:        []string{kafkaBroker},
+		Topic:          "game-results",
+		GroupID:        groupID,
+		MinBytes:       1,                      // Fetch immediately
+		MaxBytes:       1e6,                    // 1MB max fetch size
+		MaxWait:        10 * time.Millisecond,  // Wait 10ms max
+		CommitInterval: 100 * time.Millisecond, // Commit offsets frequently
 	})
 
 	defer reader.Close()
-
-	// Seek to the specified offset
-	err := reader.SetOffset(offset)
-	if err != nil {
-		log.Printf(Red+"[ERROR] Failed to set Kafka offset: %v"+Reset, err)
-		return nil, fmt.Errorf("failed to set offset: %w", err)
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -166,4 +164,38 @@ func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*model
 
 		log.Printf(Yellow+"[INFO] Session ID mismatch: %s vs %s"+Reset, sessionID, gameSession.SessionID)
 	}
+}
+
+// updateSession publishes the updated game session to the Kafka game-results topic
+func UpdateSession(session *models.GameSession, kafkaBroker string) error {
+	topic := "game-results"
+	log.Printf(Orange+"[INFO] Updating session | SessionID: %s"+Reset, session.SessionID)
+
+	writer := kafka.NewWriter(kafka.WriterConfig{
+		Brokers:      []string{kafkaBroker},
+		Topic:        topic,
+		Balancer:     &kafka.LeastBytes{},
+		BatchSize:    1,                    // Send each message individually
+		BatchBytes:   1e6,                  // 1MB max batch size
+		BatchTimeout: 5 * time.Millisecond, // Send immediately
+	})
+	defer writer.Close()
+
+	sessionBytes, err := json.Marshal(session)
+	if err != nil {
+		log.Printf(Red+"[ERROR] Failed to marshal session | SessionID: %s | Error: %v"+Reset, session.SessionID, err)
+		return err
+	}
+
+	if err := writer.WriteMessages(context.Background(), kafka.Message{
+		Key:   []byte(session.SessionID),
+		Value: sessionBytes,
+	}); err != nil {
+		log.Printf(Orange+"[ERROR] Failed to write message to Kafka topic %s | SessionID: %s | Error: %v"+Reset, topic, session.SessionID, err)
+		return err
+	}
+	log.Printf(Orange+"[INFO] Successfully wrote session update to Kafka topic | SessionID: %s"+Reset, session.SessionID)
+	log.Printf(Green+"[INFO] Message written to Kafka topic %s: %s"+Reset, topic, sessionBytes) // Log the entire message
+
+	return nil
 }
