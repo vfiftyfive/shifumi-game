@@ -12,6 +12,14 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+const (
+	Reset  = "\033[0m"
+	Red    = "\033[31m"
+	Green  = "\033[32m"
+	Yellow = "\033[33m"
+	Orange = "\033[33m"
+)
+
 // WriteMessage writes a message to Kafka using a given writer
 func WriteMessages(writer *kafka.Writer, key, value []byte) error {
 	err := writer.WriteMessages(context.Background(), kafka.Message{
@@ -112,6 +120,7 @@ func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*model
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{kafkaBroker},
 		Topic:    "game-session",
+		GroupID:  "game-session-reader",
 		MinBytes: 1,    // Fetch even the smallest message
 		MaxBytes: 10e6, // Allow fetching large messages
 	})
@@ -121,6 +130,7 @@ func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*model
 	// Seek to the specified offset
 	err := reader.SetOffset(offset)
 	if err != nil {
+		log.Printf(Red+"[ERROR] Failed to set Kafka offset: %v"+Reset, err)
 		return nil, fmt.Errorf("failed to set offset: %w", err)
 	}
 
@@ -131,25 +141,29 @@ func ReadGameSession(sessionID string, kafkaBroker string, offset int64) (*model
 		msg, err := reader.ReadMessage(ctx)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
+				log.Printf(Yellow + "[INFO] No message found within timeout" + Reset)
 				return nil, nil // No message found within the timeout
 			}
+			log.Printf(Red+"[ERROR] Error reading message: %v"+Reset, err)
 			return nil, fmt.Errorf("error reading message: %w", err)
 		}
 
+		log.Printf(Green+"[INFO] Message read from Kafka: %s"+Reset, string(msg.Value)) // Log the entire message
+
 		var gameSession models.GameSession
 		if err := json.Unmarshal(msg.Value, &gameSession); err != nil {
+			log.Printf(Red+"[ERROR] Error unmarshalling message: %v"+Reset, err)
 			return nil, fmt.Errorf("error unmarshalling message: %w", err)
 		}
 
+		log.Printf(Green+"[INFO] Unmarshalled GameSession: %+v"+Reset, gameSession) // Log the unmarshalled session
+
 		// Ensure the message is for the correct session
 		if gameSession.SessionID == sessionID {
+			log.Printf(Green+"[INFO] Game session found: %s"+Reset, gameSession.SessionID)
 			return &gameSession, nil
 		}
 
-		// If we've reached the beginning of the partition and haven't found the session,
-		// it likely doesn't exist.
-		if msg.Offset == 0 {
-			return nil, nil
-		}
+		log.Printf(Yellow+"[INFO] Session ID mismatch: %s vs %s"+Reset, sessionID, gameSession.SessionID)
 	}
 }
