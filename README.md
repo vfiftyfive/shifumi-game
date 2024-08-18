@@ -85,6 +85,12 @@ Welcome to the Shifumi Game! This is a simple implementation of the classic Rock
 
 You can check on /stats to see that the game has been won by player 1 or in the server logs. Alternatively, if you're trying to play again, the server will display the following message: "Game has already finished. Player 1 won!"
 
+To query the /stats endpoint, run:
+
+```
+curl http://localhost:8082/stats
+```
+
 ## 🧠 Game Logic
 
 The game operates on a simple turn-based system where two players make their choices in each round. Once both players have submitted their choices, the server determines the winner based on the classic rock-paper-scissors rules.
@@ -125,7 +131,7 @@ The Shifumi Game is composed of the following components:
 
 ### Client logic
 
-![](assets/mermaid.png)
+<img src="assets/mermaid.png" alt="Diagram" width="600"/>
 
 ### Notes on Scalability
 
