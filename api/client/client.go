@@ -27,6 +27,7 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+// generateSessionID genereates a new session ID when first player joins
 func generateSessionID() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 10)
@@ -36,6 +37,7 @@ func generateSessionID() string {
 	return string(b)
 }
 
+// isValidChoice determines if the player choice is valid
 func isValidChoice(choice string) bool {
 	validChoices := map[string]bool{
 		"rock":     true,
@@ -154,6 +156,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 	log.Println("[INFO] Response sent to client")
 }
 
+// publishPlayerChoice writes the player choice struct to the player-choices topic
 func publishPlayerChoice(choice models.PlayerChoice, kafkaBroker string) error {
 	writer := kafkago.NewWriter(kafkago.WriterConfig{
 		Brokers:  []string{kafkaBroker},
