@@ -26,17 +26,17 @@ type GameSession struct {
 	Player1Wins      int           `json:"player1_wins"`
 	Player2Wins      int           `json:"player2_wins"`
 	Draws            int           `json:"draws"`
-	winner           string
+	Winner           string        `json:"winner"`
 }
 
 // Setter for the winner
 func (gs *GameSession) SetWinner(winner string) {
-	gs.winner = winner
+	gs.Winner = winner
 }
 
 // Getter for the winner
 func (gs *GameSession) GetWinner() string {
-	return gs.winner
+	return gs.Winner
 }
 
 // NewGameSession creates a new GameSession with default values

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -88,7 +89,7 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		}
 		if gameSession == nil {
 			log.Printf("[ERROR] Session ID does not exist, or the server is busy processing another player's choice.")
-			http.Error(w, "Session ID does not exist or game has not started yet.", http.StatusBadRequest)
+			http.Error(w, "Session ID does not exist, or the server is busy processing another player's choice.", http.StatusBadRequest)
 			return
 		}
 
@@ -128,7 +129,8 @@ func MakeChoiceHandler(w http.ResponseWriter, r *http.Request, kafkaBroker strin
 		// Check if the game has already finished.
 		if gameSession.Status == "finished" {
 			log.Printf("[ERROR] Attempt to play in a finished game session: %s", choice.SessionID)
-			http.Error(w, "Game has already finished", http.StatusConflict)
+			http.Error(w, fmt.Sprintf("Game has already finished. %s won!", gameSession.Winner), http.StatusConflict)
+
 			return
 		}
 	}
