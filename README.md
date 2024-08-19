@@ -119,6 +119,7 @@ The game operates on a simple turn-based system where two players make their cho
 - **api/client/**: Contains the client-side code to interact with the server.
 - **api/server/**: Contains the server-side code that handles game logic.
 - **cmd/server/**: The entry point for the server application.
+- **cmd/client/**: The entry point for the client application.
 
 ## 🏛️ Architecture
 
