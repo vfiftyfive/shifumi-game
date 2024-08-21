@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shifumi-server
+spec:
+  template:
+    spec:
+      containers:
+      - name: shifumi-server
+        envFrom:
+        - configMapRef: 
+            name: kafka-broker

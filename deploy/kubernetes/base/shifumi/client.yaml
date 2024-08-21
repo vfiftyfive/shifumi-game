@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: shifumi-client
+  name: shifumi-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shifumi-client
+  template:
+    metadata:
+      labels:
+        app: shifumi-client
+    spec:
+      containers:
+      - image: vfiftyfive/shifumi-client
+        name: shifumi-client
+        ports: 
+        - containerPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: shifumi-client
+  name: shifumi-client
+spec:
+  ports:
+  - name: 8081-shifumi-client
+    port: 8081
+    protocol: TCP
+    targetPort: shifumi-client
+  selector:
+    app: shifumi-client
+  type: NodePort
+
+
+
