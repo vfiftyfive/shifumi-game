@@ -15,7 +15,7 @@ spec:
         app: shifumi-server
     spec:
       containers:
-      - image: vfiftyfive/shifumi-server
+      - image: ghcr.io/vfiftyfive/shifumi-server
         name: shifumi-server
         ports: 
         - name: shifumi-server

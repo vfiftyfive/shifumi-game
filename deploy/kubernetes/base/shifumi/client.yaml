@@ -15,7 +15,7 @@ spec:
         app: shifumi-client
     spec:
       containers:
-      - image: vfiftyfive/shifumi-client
+      - image: ghcr.io/vfiftyfive/shifumi-client
         name: shifumi-client
         ports: 
         - name: shifumi-client
