@@ -18,7 +18,8 @@ spec:
       - image: vfiftyfive/shifumi-server
         name: shifumi-server
         ports: 
-        - containerPort: 8082
+        - name: shifumi-server
+          containerPort: 8082
 ---
 apiVersion: v1
 kind: Service
