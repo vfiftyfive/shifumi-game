@@ -22,7 +22,7 @@ type GameSession struct {
 	CurrentRound     int           `json:"round"`
 	Player1HasPlayed bool          `json:"player_1_has_played"`
 	Player2HasPlayed bool          `json:"player_2_has_played"`
-	Rounds           []RoundResult `json:"rounds"`
+	Results          []RoundResult `json:"rounds"`
 	Player1Wins      int           `json:"player1_wins"`
 	Player2Wins      int           `json:"player2_wins"`
 	Draws            int           `json:"draws"`
@@ -44,7 +44,7 @@ func NewGameSession(sessionID string) *GameSession {
 	return &GameSession{
 		SessionID:        sessionID,
 		Status:           "in progress",
-		Rounds:           []RoundResult{{RoundNumber: 1}},
+		Results:           []RoundResult{{RoundNumber: 1}},
 		CurrentRound:     1,
 		Player1HasPlayed: false,
 		Player2HasPlayed: false,

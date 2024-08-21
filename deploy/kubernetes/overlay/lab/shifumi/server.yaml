@@ -7,6 +7,7 @@ spec:
     spec:
       containers:
       - name: shifumi-server
+        imagePullPolicy: Always
         envFrom:
         - configMapRef: 
             name: kafka-broker

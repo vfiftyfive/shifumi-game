@@ -85,7 +85,7 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 
 	// Record the player's choice
-	currentRound := &gameSession.Rounds[gameSession.CurrentRound-1]
+	currentRound := &gameSession.Results[gameSession.CurrentRound-1]
 	if choice.PlayerID == "1" {
 		currentRound.Player1 = &choice
 		gameSession.SetPlayer1HasPlayed(true)
@@ -111,7 +111,7 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 
 		// Prepare for the next round
 		gameSession.CurrentRound++
-		gameSession.Rounds = append(gameSession.Rounds, models.RoundResult{
+		gameSession.Results= append(gameSession.Results, models.RoundResult{
 			RoundNumber: gameSession.CurrentRound,
 		})
 		gameSession.SetPlayer1HasPlayed(false)
@@ -128,7 +128,7 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 
 // determineWinner determines the winner of the current round and updates the game session accordingly
 func determineWinner(session *models.GameSession) {
-	currentRound := &session.Rounds[session.CurrentRound-1]
+	currentRound := &session.Results[session.CurrentRound-1]
 	var result string
 
 	switch currentRound.Player1.Choice {
