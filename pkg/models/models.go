@@ -22,7 +22,7 @@ type GameSession struct {
 	CurrentRound     int           `json:"round"`
 	Player1HasPlayed bool          `json:"player_1_has_played"`
 	Player2HasPlayed bool          `json:"player_2_has_played"`
-	Results          []RoundResult `json:"rounds"`
+	Results          []RoundResult `json:"results"`
 	Player1Wins      int           `json:"player1_wins"`
 	Player2Wins      int           `json:"player2_wins"`
 	Draws            int           `json:"draws"`
