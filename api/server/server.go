@@ -25,38 +25,48 @@ var mu sync.Mutex
 
 // ProcessChoices listens to the player-choices topic and processes incoming player choices
 func ProcessChoices(kafkaBroker string) {
-	topic := "player-choices"
-	log.Printf(Green+"[INFO] Creating Kafka reader for topic: %s"+Reset, topic)
+  topic := "player-choices"
+  backoff := 2 * time.Second // Initial backoff duration
 
-	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers:  []string{kafkaBroker},
-		Topic:    topic,
-		GroupID:  "game-logic",
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
-	})
-	defer func() {
-		log.Printf(Green+"[INFO] Closing Kafka reader for topic: %s"+Reset, topic)
-		reader.Close()
-	}()
+  for {
+      log.Printf(Green+"[INFO] Creating Kafka reader for topic: %s"+Reset, topic)
 
-	for {
-		err := kafka.ReadMessages(reader, func(key, value []byte) error {
-			log.Printf(Green+"[INFO] Processing message from topic: %s"+Reset, topic)
+      reader := kafkago.NewReader(kafkago.ReaderConfig{
+          Brokers:  []string{kafkaBroker},
+          Topic:    topic,
+          GroupID:  "game-logic",
+          MinBytes: 10e3, // 10KB
+          MaxBytes: 10e6, // 10MB
+      })
 
-			// Skip messages where the key or value starts with "test"
-			if strings.HasPrefix(string(key), "test") || strings.HasPrefix(string(value), "test") {
-				log.Printf(Green+"[INFO] Skipping test message | Key: %s | Value: %s"+Reset, string(key), string(value))
-				return nil
-			}
+      for {
+          err := kafka.ReadMessages(reader, func(key, value []byte) error {
+              log.Printf(Green+"[INFO] Processing message from topic: %s"+Reset, topic)
 
-			return handlePlayerChoice(key, value, kafkaBroker)
-		})
-		if err != nil {
-			log.Printf(Red+"[ERROR] Error reading messages from topic %s: %v"+Reset, topic, err)
-			time.Sleep(2 * time.Second)
-		}
-	}
+              // Skip messages where the key or value starts with "test"
+              if strings.HasPrefix(string(key), "test") || strings.HasPrefix(string(value), "test") {
+                  log.Printf(Green+"[INFO] Skipping test message | Key: %s | Value: %s"+Reset, string(key), string(value))
+                  return nil
+              }
+
+              return handlePlayerChoice(key, value, kafkaBroker)
+          })
+          if err != nil {
+              log.Printf(Red+"[ERROR] Error reading messages from topic %s: %v. Retrying in %s"+Reset, topic, err, backoff)
+              time.Sleep(backoff)
+              if backoff < 1*time.Minute {
+                  backoff *= 2 // Exponential backoff, with a cap at 1 minute
+              }
+              break // Exit the inner loop to recreate the reader and reconnect
+          }
+          // Reset backoff after a successful read
+          backoff = 2 * time.Second
+      }
+
+      log.Printf(Red+"[ERROR] Reconnecting Kafka reader for topic %s due to persistent errors"+Reset, topic)
+      reader.Close()
+      time.Sleep(backoff)
+  }
 }
 
 // handlePlayerChoice processes each player choice, updating the game session and determining the round winner
