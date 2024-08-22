@@ -15,11 +15,13 @@ func main() {
 		log.Fatal("KAFKA_BROKER environment variable is not set")
 	}
 
-	// Monitor Kafka availability before starting the server
+	// Topics to monitor
 	topics := []string{"player-choices", "game-results"}
-	go kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1, 10*time.Second)
 
-	log.Println("[INFO] Starting game logic service setup...")
+	// Monitor Kafka availability before starting the server
+	log.Println("[INFO] Waiting for Kafka to be available...")
+	kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1, 10*time.Second)
+	log.Println("[INFO] Kafka is available. Starting game logic service setup...")
 
 	// Start processing player choices in a separate goroutine
 	go func() {
@@ -39,3 +41,4 @@ func main() {
 	log.Println("[INFO] Game logic service is running on port 8082")
 	log.Fatal(http.ListenAndServe(":8082", nil)) // Serve on port 8082
 }
+
