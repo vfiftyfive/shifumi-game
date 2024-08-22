@@ -29,7 +29,7 @@ docker-client:
   WORKDIR /app
   COPY +build-client/client .
   CMD ["/app/client"]
-  SAVE IMAGE --push ghcr.io/vfiftyfive/shifumi-client
+  SAVE IMAGE --push ghcr.io/vfiftyfive/shifumi-client:latest
 
 # Target to create the final server image
 docker-server:
