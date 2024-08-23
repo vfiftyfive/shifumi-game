@@ -1,10 +1,16 @@
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
-  name: dual-role
+  name: shifumi-kafka-pool-dual-role
   labels:
     strimzi.io/cluster: lab
 spec:
+  template:
+    pod:
+      metadata:
+        annotations:
+          intents.otterize.com/service-name: "shifumi-kafka"
+
   replicas: 1
   roles:
     - controller
@@ -46,5 +52,10 @@ spec:
       default.replication.factor: 1
       min.insync.replicas: 1
   entityOperator:
+    template:
+      pod:
+        metadata:
+          annotations: 
+            intents.otterize.com/service-name: "kafka-entity-operator"
     topicOperator: {}
     userOperator: {}
