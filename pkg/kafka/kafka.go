@@ -46,7 +46,7 @@ func ReadMessages(reader *kafka.Reader, handleMessage func(key, value []byte) er
 	}
 }
 
-// CreateKafkaTopic ensures the Kafka topic exists
+// CreateKafkaTopic creates a topic
 func CreateKafkaTopic(brokers []string, topic string, partitions, replicationFactor int) error {
 	conn, err := kafka.DialLeader(context.Background(), "tcp", brokers[0], topic, 0)
 	if err != nil {
@@ -113,10 +113,6 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 }
 
 // ReadGameSession reads a GameSession from Kafka based on the sessionID.
-// It assumes you're NOT using a consumer group.
-// The `offset` parameter controls which message to read:
-//   - kafka.FirstOffset: Reads the first message in the topic.
-//   - kafka.LastOffset:  Reads the last message in the topic.
 func ReadGameSession(sessionID string, kafkaBroker string, prefix string) (*models.GameSession, error) {
 	// Build different consumer group for client/server per sessionID
 	groupID := prefix + "-game-session-group-" + sessionID
