@@ -16,7 +16,7 @@ func main() {
 	}
 
 	// Topics to monitor
-	topics := []string{"player-choices", "game-results"}
+	topics := []string{"player-choices"}
 
 	// Monitor Kafka availability before starting the server
 	log.Println("[INFO] Waiting for Kafka to be available...")
@@ -41,4 +41,3 @@ func main() {
 	log.Println("[INFO] Game logic service is running on port 8082")
 	log.Fatal(http.ListenAndServe(":8082", nil)) // Serve on port 8082
 }
-

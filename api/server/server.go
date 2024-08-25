@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"shifumi-game/pkg/kafka"
@@ -25,48 +26,48 @@ var mu sync.Mutex
 
 // ProcessChoices listens to the player-choices topic and processes incoming player choices
 func ProcessChoices(kafkaBroker string) {
-  topic := "player-choices"
-  backoff := 2 * time.Second // Initial backoff duration
+	topic := "player-choices"
+	backoff := 2 * time.Second // Initial backoff duration
 
-  for {
-      log.Printf(Green+"[INFO] Creating Kafka reader for topic: %s"+Reset, topic)
+	for {
+		log.Printf(Green+"[INFO] Creating Kafka reader for topic: %s"+Reset, topic)
 
-      reader := kafkago.NewReader(kafkago.ReaderConfig{
-          Brokers:  []string{kafkaBroker},
-          Topic:    topic,
-          GroupID:  "game-logic",
-          MinBytes: 10e3, // 10KB
-          MaxBytes: 10e6, // 10MB
-      })
+		reader := kafkago.NewReader(kafkago.ReaderConfig{
+			Brokers:  []string{kafkaBroker},
+			Topic:    topic,
+			GroupID:  "game-logic",
+			MinBytes: 10e3, // 10KB
+			MaxBytes: 10e6, // 10MB
+		})
 
-      for {
-          err := kafka.ReadMessages(reader, func(key, value []byte) error {
-              log.Printf(Green+"[INFO] Processing message from topic: %s"+Reset, topic)
+		for {
+			err := kafka.ReadMessages(reader, func(key, value []byte) error {
+				log.Printf(Green+"[INFO] Processing message from topic: %s"+Reset, topic)
 
-              // Skip messages where the key or value starts with "test"
-              if strings.HasPrefix(string(key), "test") || strings.HasPrefix(string(value), "test") {
-                  log.Printf(Green+"[INFO] Skipping test message | Key: %s | Value: %s"+Reset, string(key), string(value))
-                  return nil
-              }
+				// Skip messages where the key or value starts with "test"
+				if strings.HasPrefix(string(key), "test") || strings.HasPrefix(string(value), "test") {
+					log.Printf(Green+"[INFO] Skipping test message | Key: %s | Value: %s"+Reset, string(key), string(value))
+					return nil
+				}
 
-              return handlePlayerChoice(key, value, kafkaBroker)
-          })
-          if err != nil {
-              log.Printf(Red+"[ERROR] Error reading messages from topic %s: %v. Retrying in %s"+Reset, topic, err, backoff)
-              time.Sleep(backoff)
-              if backoff < 1*time.Minute {
-                  backoff *= 2 // Exponential backoff, with a cap at 1 minute
-              }
-              break // Exit the inner loop to recreate the reader and reconnect
-          }
-          // Reset backoff after a successful read
-          backoff = 2 * time.Second
-      }
+				return handlePlayerChoice(key, value, kafkaBroker)
+			})
+			if err != nil {
+				log.Printf(Red+"[ERROR] Error reading messages from topic %s: %v. Retrying in %s"+Reset, topic, err, backoff)
+				time.Sleep(backoff)
+				if backoff < 1*time.Minute {
+					backoff *= 2 // Exponential backoff, with a cap at 1 minute
+				}
+				break // Exit the inner loop to recreate the reader and reconnect
+			}
+			// Reset backoff after a successful read
+			backoff = 2 * time.Second
+		}
 
-      log.Printf(Red+"[ERROR] Reconnecting Kafka reader for topic %s due to persistent errors"+Reset, topic)
-      reader.Close()
-      time.Sleep(backoff)
-  }
+		log.Printf(Red+"[ERROR] Reconnecting Kafka reader for topic %s due to persistent errors"+Reset, topic)
+		reader.Close()
+		time.Sleep(backoff)
+	}
 }
 
 // handlePlayerChoice processes each player choice, updating the game session and determining the round winner
@@ -82,12 +83,13 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 
 	var gameSession *models.GameSession
 	var err error
+	topicName := "game-results-" + choice.SessionID
 
 	if choice.InitSession {
 		gameSession = models.NewGameSession(choice.SessionID)
 		log.Printf(Green+"[INFO] New game session created | SessionID: %s"+Reset, choice.SessionID)
 	} else {
-		gameSession, err = kafka.ReadGameSession(choice.SessionID, kafkaBroker, "server")
+		gameSession, err = kafka.ReadGameSession(topicName, choice.SessionID, kafkaBroker, "server")
 		if err != nil {
 			log.Printf(Red+"[ERROR] Error retrieving game session: %v"+Reset, err)
 			return err
@@ -95,6 +97,12 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 
 	// Record the player's choice
+
+	if gameSession == nil {
+		log.Printf(Red+"[ERROR] Invalid game session state | SessionID: %s"+Reset, choice.SessionID)
+		return fmt.Errorf("invalid game session state for sessionID: %s", choice.SessionID)
+	}
+
 	currentRound := &gameSession.Results[gameSession.CurrentRound-1]
 	if choice.PlayerID == "1" {
 		currentRound.Player1 = &choice
@@ -121,7 +129,7 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 
 		// Prepare for the next round
 		gameSession.CurrentRound++
-		gameSession.Results= append(gameSession.Results, models.RoundResult{
+		gameSession.Results = append(gameSession.Results, models.RoundResult{
 			RoundNumber: gameSession.CurrentRound,
 		})
 		gameSession.SetPlayer1HasPlayed(false)
@@ -129,7 +137,7 @@ func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
 	}
 
 	// Publish the updated game session to Kafka
-	if err := kafka.UpdateSession(gameSession, kafkaBroker); err != nil {
+	if err := kafka.UpdateSession(topicName, gameSession, kafkaBroker); err != nil {
 		log.Printf(Orange+"[ERROR] Error updating session | SessionID: %s | Error: %v"+Reset, gameSession.SessionID, err)
 	}
 
