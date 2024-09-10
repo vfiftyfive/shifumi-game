@@ -213,9 +213,6 @@ func determineWinner(session *models.GameSession) {
 func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	log.Println("[INFO] Received request to StatsHandler")
 
-	// Set response header
-	w.Header().Set("Content-Type", "application/json")
-
 	// Create a Kafka client
 	client := kafkago.Client{
 		Addr: kafkago.TCP(kafkaBroker),
@@ -224,24 +221,14 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	// Define the regex pattern for topics
 	topicPattern := regexp.MustCompile(`^game-results-.*`)
 
-	// Setup channel to listen for SIGINT
-	sigint := make(chan os.Signal, 1)
-	signal.Notify(sigint, syscall.SIGINT)
-
-	// Context to manage Kafka operations
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Goroutine to handle SIGINT and cancel the context
-	go func() {
-		<-sigint
-		log.Println("[INFO] Received SIGINT, shutting down")
-		cancel()
-	}()
+	// Create a context that listens for SIGINT or SIGTERM signals
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Wait for a matching topic to become available
 	var matchingTopics []kafkago.Topic
-searchLoop: // Labeled loop to allow breaking from outer loop
+
+searchLoop: // Labeled loop to allow breaking out after finding matching topics
 	for {
 		select {
 		case <-ctx.Done():
@@ -249,27 +236,30 @@ searchLoop: // Labeled loop to allow breaking from outer loop
 			return
 		default:
 			var err error
+			// Use the topics.ListRe to find matching topics
 			matchingTopics, err = topics.ListRe(ctx, &client, topicPattern)
 			if err != nil {
 				log.Printf("[ERROR] Error listing topics: %v", err)
-				// Instead of returning, continue to retry
+				// Retry after a brief sleep
 				time.Sleep(5 * time.Second)
 				continue
 			}
 
 			if len(matchingTopics) > 0 {
 				log.Println("[INFO] Found matching topics, proceeding")
-				break searchLoop // Break the outer loop once we find topics
+				break searchLoop // Break out of the loop when matching topics are found
 			}
 
-			// Sleep for a while before retrying
+			// Sleep for a while before retrying to find topics
 			time.Sleep(5 * time.Second)
 		}
 	}
 
+	// Set response header
+	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 
-	// Iterate over each matching topic
+	// Iterate over each matching topic and read messages
 	for _, topic := range matchingTopics {
 		reader := kafkago.NewReader(kafkago.ReaderConfig{
 			Brokers:  []string{kafkaBroker},
@@ -278,25 +268,20 @@ searchLoop: // Labeled loop to allow breaking from outer loop
 			MinBytes: 10e3, // 10KB
 			MaxBytes: 10e6, // 10MB
 		})
+		defer reader.Close()
 
-		// Read messages from the Kafka topic
+		// Kafka message reading loop
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("[INFO] Context canceled, closing reader")
-				reader.Close()
+				log.Println("[INFO] Context canceled, shutting down reader")
 				return
 			default:
+				// Try reading a message from Kafka
 				msg, err := reader.ReadMessage(ctx)
 				if err != nil {
-					if err == context.Canceled {
-						// Gracefully handle context cancellation
-						log.Println("[INFO] Kafka reader context canceled")
-						reader.Close()
-						return
-					}
 					log.Printf("[ERROR] Error fetching message from Kafka: %v", err)
-					// Log the error and continue to retry
+					// Log the error and retry after a brief sleep
 					time.Sleep(1 * time.Second)
 					continue
 				}
@@ -307,11 +292,14 @@ searchLoop: // Labeled loop to allow breaking from outer loop
 					continue
 				}
 
+				// Log the session and send it to the client
 				log.Printf("[INFO] Live game session: %v", session)
 				if err := encoder.Encode(session); err != nil {
 					log.Printf("[ERROR] Error encoding session: %v", err)
 				}
-				w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
+
+				// Flush the data to ensure it gets sent to the client immediately
+				w.(http.Flusher).Flush()
 			}
 		}
 	}
