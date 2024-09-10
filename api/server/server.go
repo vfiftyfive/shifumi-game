@@ -1,15 +1,19 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"regexp"
 	"shifumi-game/pkg/kafka"
 	"shifumi-game/pkg/models"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
@@ -52,7 +56,7 @@ func ProcessChoices(kafkaBroker string) {
 					return nil
 				}
 
-				return handlePlayerChoice(key, value, kafkaBroker)
+				return handlePlayerChoice(value, kafkaBroker)
 			})
 			if err != nil {
 				log.Printf(Red+"[ERROR] Error reading messages from topic %s: %v. Retrying in %s"+Reset, topic, err, backoff)
@@ -73,7 +77,7 @@ func ProcessChoices(kafkaBroker string) {
 }
 
 // handlePlayerChoice processes each player choice, updating the game session and determining the round winner
-func handlePlayerChoice(key, value []byte, kafkaBroker string) error {
+func handlePlayerChoice(value []byte, kafkaBroker string) error {
 	mu.Lock()         // Lock the mutex
 	defer mu.Unlock() // Ensure the mutex is unlocked when function exits
 	var choice models.PlayerChoice
@@ -209,6 +213,9 @@ func determineWinner(session *models.GameSession) {
 func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	log.Println("[INFO] Received request to StatsHandler")
 
+	// Set response header
+	w.Header().Set("Content-Type", "application/json")
+
 	// Create a Kafka client
 	client := kafkago.Client{
 		Addr: kafkago.TCP(kafkaBroker),
@@ -217,16 +224,48 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	// Define the regex pattern for topics
 	topicPattern := regexp.MustCompile(`^game-results-.*`)
 
-	// Get the list of topics matching the regex
-	matchingTopics, err := topics.ListRe(r.Context(), &client, topicPattern)
-	if err != nil {
-		log.Printf("[ERROR] Error listing topics: %v", err)
-		http.Error(w, "Error listing topics", http.StatusInternalServerError)
-		return
+	// Setup channel to listen for SIGINT
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, syscall.SIGINT)
+
+	// Context to manage Kafka operations
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Goroutine to handle SIGINT and cancel the context
+	go func() {
+		<-sigint
+		log.Println("[INFO] Received SIGINT, shutting down")
+		cancel()
+	}()
+
+	// Wait for a matching topic to become available
+	var matchingTopics []kafkago.Topic
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("[INFO] Context canceled, exiting")
+			return
+		default:
+			var err error
+			matchingTopics, err = topics.ListRe(ctx, &client, topicPattern)
+			if err != nil {
+				log.Printf("[ERROR] Error listing topics: %v", err)
+				// Instead of returning, continue to retry
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			if len(matchingTopics) > 0 {
+				log.Println("[INFO] Found matching topics, proceeding")
+				break
+			}
+
+			// Sleep for a while before retrying
+			time.Sleep(5 * time.Second)
+		}
 	}
 
-	// Set response header
-	w.Header().Set("Content-Type", "application/json")
 	encoder := json.NewEncoder(w)
 
 	// Iterate over each matching topic
@@ -241,22 +280,29 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 		defer reader.Close()
 
 		for {
-			msg, err := reader.ReadMessage(r.Context())
-			if err != nil {
-				log.Printf("[ERROR] Error fetching message from Kafka: %v", err)
-				http.Error(w, "Error reading live stats", http.StatusInternalServerError)
+			select {
+			case <-ctx.Done():
+				log.Println("[INFO] Context canceled, exiting")
 				return
-			}
+			default:
+				msg, err := reader.ReadMessage(ctx)
+				if err != nil {
+					log.Printf("[ERROR] Error fetching message from Kafka: %v", err)
+					// Log the error and continue to retry
+					time.Sleep(1 * time.Second)
+					continue
+				}
 
-			var session models.GameSession
-			if err := json.Unmarshal(msg.Value, &session); err != nil {
-				log.Printf("[ERROR] Error unmarshalling game session: %v", err)
-				continue
-			}
+				var session models.GameSession
+				if err := json.Unmarshal(msg.Value, &session); err != nil {
+					log.Printf("[ERROR] Error unmarshalling game session: %v", err)
+					continue
+				}
 
-			log.Printf("[INFO] Live game session: %v", session)
-			encoder.Encode(session)  // Stream each session result as it arrives
-			w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
+				log.Printf("[INFO] Live game session: %v", session)
+				encoder.Encode(session)  // Stream each session result as it arrives
+				w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
+			}
 		}
 	}
 }
