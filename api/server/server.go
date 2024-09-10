@@ -251,7 +251,6 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 			matchingTopics, err = topics.ListRe(ctx, &client, topicPattern)
 			if err != nil {
 				log.Printf("[ERROR] Error listing topics: %v", err)
-				// Instead of returning, continue to retry
 				time.Sleep(5 * time.Second)
 				continue
 			}
@@ -261,9 +260,14 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 				break
 			}
 
-			// Sleep for a while before retrying
+			log.Println("[INFO] No matching topics found, retrying...")
 			time.Sleep(5 * time.Second)
 		}
+	}
+
+	if len(matchingTopics) == 0 {
+		log.Println("[ERROR] No matching topics found after retries")
+		return
 	}
 
 	encoder := json.NewEncoder(w)
@@ -288,7 +292,6 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 				msg, err := reader.ReadMessage(ctx)
 				if err != nil {
 					log.Printf("[ERROR] Error fetching message from Kafka: %v", err)
-					// Log the error and continue to retry
 					time.Sleep(1 * time.Second)
 					continue
 				}
