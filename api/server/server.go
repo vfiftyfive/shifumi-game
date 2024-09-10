@@ -222,8 +222,22 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 	topicPattern := regexp.MustCompile(`^game-results-.*`)
 
 	// Create a context that listens for SIGINT or SIGTERM signals
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	serverCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Get request context from the HTTP request (will be canceled if the client disconnects)
+	reqCtx := r.Context()
+
+	// Combine both contexts (server and request)
+	ctx, cancel := context.WithCancel(reqCtx)
+	defer cancel()
+
+	// Goroutine to handle server-level SIGINT/SIGTERM
+	go func() {
+		<-serverCtx.Done() // SIGINT/SIGTERM received
+		log.Println("[INFO] Received SIGINT, shutting down")
+		cancel() // Cancel the request context
+	}()
 
 	// Wait for a matching topic to become available
 	var matchingTopics []kafkago.Topic
