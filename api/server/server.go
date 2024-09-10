@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"shifumi-game/pkg/kafka"
 	"shifumi-game/pkg/models"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+	"github.com/segmentio/kafka-go/topics"
 )
 
 const (
@@ -205,36 +207,56 @@ func determineWinner(session *models.GameSession) {
 
 // StatsHandler handles the /stats API endpoint and streams the game results to the client
 func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
-	log.Println(Green + "[INFO] Received request to StatsHandler" + Reset)
+	log.Println("[INFO] Received request to StatsHandler")
 
-	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers:  []string{kafkaBroker},
-		Topic:    "game-results-*",
-		GroupID:  "live-stats-consumer",
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
-	})
-	defer reader.Close()
+	// Create a Kafka client
+	client := kafkago.Client{
+		Addr: kafkago.TCP(kafkaBroker),
+	}
 
+	// Define the regex pattern for topics
+	topicPattern := regexp.MustCompile(`^game-results-.*`)
+
+	// Get the list of topics matching the regex
+	matchingTopics, err := topics.ListRe(r.Context(), &client, topicPattern)
+	if err != nil {
+		log.Printf("[ERROR] Error listing topics: %v", err)
+		http.Error(w, "Error listing topics", http.StatusInternalServerError)
+		return
+	}
+
+	// Set response header
 	w.Header().Set("Content-Type", "application/json")
-
 	encoder := json.NewEncoder(w)
-	for {
-		msg, err := reader.ReadMessage(r.Context())
-		if err != nil {
-			log.Printf(Red+"[ERROR] Error fetching message from Kafka: %v"+Reset, err)
-			http.Error(w, "Error reading live stats", http.StatusInternalServerError)
-			return
-		}
 
-		var session models.GameSession
-		if err := json.Unmarshal(msg.Value, &session); err != nil {
-			log.Printf(Red+"[ERROR] Error unmarshalling game session: %v"+Reset, err)
-			continue
-		}
+	// Iterate over each matching topic
+	for _, topic := range matchingTopics {
+		reader := kafkago.NewReader(kafkago.ReaderConfig{
+			Brokers:  []string{kafkaBroker},
+			Topic:    topic.Name,
+			GroupID:  "live-stats-consumer",
+			MinBytes: 10e3, // 10KB
+			MaxBytes: 10e6, // 10MB
+		})
+		defer reader.Close()
 
-		log.Printf(Green+"[INFO] Live game session: %v"+Reset, session)
-		encoder.Encode(session)  // Stream each session result as it arrives
-		w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
+		for {
+			msg, err := reader.ReadMessage(r.Context())
+			if err != nil {
+				log.Printf("[ERROR] Error fetching message from Kafka: %v", err)
+				http.Error(w, "Error reading live stats", http.StatusInternalServerError)
+				return
+			}
+
+			var session models.GameSession
+			if err := json.Unmarshal(msg.Value, &session); err != nil {
+				log.Printf("[ERROR] Error unmarshalling game session: %v", err)
+				continue
+			}
+
+			log.Printf("[INFO] Live game session: %v", session)
+			encoder.Encode(session)  // Stream each session result as it arrives
+			w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
+		}
 	}
 }
