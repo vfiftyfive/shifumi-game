@@ -241,6 +241,7 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 
 	// Wait for a matching topic to become available
 	var matchingTopics []kafkago.Topic
+searchLoop: // Labeled loop to allow breaking from outer loop
 	for {
 		select {
 		case <-ctx.Done():
@@ -251,23 +252,19 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 			matchingTopics, err = topics.ListRe(ctx, &client, topicPattern)
 			if err != nil {
 				log.Printf("[ERROR] Error listing topics: %v", err)
+				// Instead of returning, continue to retry
 				time.Sleep(5 * time.Second)
 				continue
 			}
 
 			if len(matchingTopics) > 0 {
 				log.Println("[INFO] Found matching topics, proceeding")
-				break
+				break searchLoop // Break the outer loop once we find topics
 			}
 
-			log.Println("[INFO] No matching topics found, retrying...")
+			// Sleep for a while before retrying
 			time.Sleep(5 * time.Second)
 		}
-	}
-
-	if len(matchingTopics) == 0 {
-		log.Println("[ERROR] No matching topics found after retries")
-		return
 	}
 
 	encoder := json.NewEncoder(w)
@@ -281,17 +278,25 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 			MinBytes: 10e3, // 10KB
 			MaxBytes: 10e6, // 10MB
 		})
-		defer reader.Close()
 
+		// Read messages from the Kafka topic
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("[INFO] Context canceled, exiting")
+				log.Println("[INFO] Context canceled, closing reader")
+				reader.Close()
 				return
 			default:
 				msg, err := reader.ReadMessage(ctx)
 				if err != nil {
+					if err == context.Canceled {
+						// Gracefully handle context cancellation
+						log.Println("[INFO] Kafka reader context canceled")
+						reader.Close()
+						return
+					}
 					log.Printf("[ERROR] Error fetching message from Kafka: %v", err)
+					// Log the error and continue to retry
 					time.Sleep(1 * time.Second)
 					continue
 				}
@@ -303,7 +308,9 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 				}
 
 				log.Printf("[INFO] Live game session: %v", session)
-				encoder.Encode(session)  // Stream each session result as it arrives
+				if err := encoder.Encode(session); err != nil {
+					log.Printf("[ERROR] Error encoding session: %v", err)
+				}
 				w.(http.Flusher).Flush() // Ensure the data is sent immediately to the client
 			}
 		}
