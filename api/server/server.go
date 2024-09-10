@@ -209,7 +209,7 @@ func StatsHandler(w http.ResponseWriter, r *http.Request, kafkaBroker string) {
 
 	reader := kafkago.NewReader(kafkago.ReaderConfig{
 		Brokers:  []string{kafkaBroker},
-		Topic:    "game-results",
+		Topic:    "game-results-*",
 		GroupID:  "live-stats-consumer",
 		MinBytes: 10e3, // 10KB
 		MaxBytes: 10e6, // 10MB

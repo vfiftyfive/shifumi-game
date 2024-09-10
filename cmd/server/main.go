@@ -20,7 +20,7 @@ func main() {
 
 	// Monitor Kafka availability before starting the server
 	log.Println("[INFO] Waiting for Kafka to be available...")
-	kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1, 10*time.Second)
+	kafka.MonitorKafkaAvailability(kafkaBroker, topics, 1, 1)
 	log.Println("[INFO] Kafka is available. Starting game logic service setup...")
 
 	// Start processing player choices in a separate goroutine

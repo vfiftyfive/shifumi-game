@@ -70,8 +70,9 @@ func CreateKafkaTopic(brokers []string, topic string, partitions, replicationFac
 }
 
 // MonitorKafkaAvailability ensure that topic is available
-func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, replicationFactor int, interval time.Duration) {
-	backoff := interval
+func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, replicationFactor int) {
+	backoff := 5 * time.Second
+	maxBackoff := 2 * time.Minute
 
 	// Convert kafkaBroker to a slice of strings
 	brokers := []string{kafkaBroker}
@@ -84,15 +85,6 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 				log.Printf("Failed to create Kafka topic %s: %v", topic, err)
 			} else {
 				log.Printf("Topic %s is available.", topic)
-			}
-
-			for _, topic := range topics {
-				err := CreateKafkaTopic(brokers, topic, partitions, replicationFactor)
-				if err != nil && err != kafka.TopicAlreadyExists {
-					log.Printf("Failed to create Kafka topic %s: %v", topic, err)
-				} else {
-					log.Printf("Topic %s is available.", topic)
-				}
 			}
 		}
 
@@ -114,10 +106,13 @@ func MonitorKafkaAvailability(kafkaBroker string, topics []string, partitions, r
 			return
 		}
 
-		// Exponential backoff with a cap
+		// Increase backoff time, but cap it at maxBackof
 		time.Sleep(backoff)
-		if backoff < 2*time.Minute {
+		if backoff < maxBackoff {
 			backoff *= 2
+		}
+		if backoff > maxBackoff {
+			backoff = maxBackoff
 		}
 	}
 }
