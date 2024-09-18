@@ -2,12 +2,13 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: shifumi-server
+  namespace: shifumi
 spec:
   template:
     spec:
       containers:
-      - name: shifumi-server
-        imagePullPolicy: Always
-        envFrom:
-        - configMapRef: 
-            name: kafka-broker
+        - name: shifumi-server
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: kafka-broker

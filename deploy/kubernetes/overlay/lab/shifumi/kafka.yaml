@@ -2,6 +2,7 @@ apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
   name: shifumi-kafka-pool-dual-role
+  namespace: kafka
   labels:
     strimzi.io/cluster: lab
 spec:
@@ -24,11 +25,11 @@ spec:
         deleteClaim: false
         kraftMetadata: shared
 ---
-
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
   name: lab
+  namespace: kafka
   annotations:
     strimzi.io/node-pools: enabled
     strimzi.io/kraft: enabled
@@ -55,7 +56,7 @@ spec:
     template:
       pod:
         metadata:
-          annotations: 
+          annotations:
             intents.otterize.com/service-name: "kafka-entity-operator"
     topicOperator: {}
     userOperator: {}

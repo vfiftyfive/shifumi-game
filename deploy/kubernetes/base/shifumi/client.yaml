@@ -4,6 +4,7 @@ metadata:
   labels:
     app: shifumi-client
   name: shifumi-client
+  namespace: shifumi
 spec:
   replicas: 1
   selector:
@@ -15,11 +16,11 @@ spec:
         app: shifumi-client
     spec:
       containers:
-      - image: ghcr.io/vfiftyfive/shifumi-client
-        name: shifumi-client
-        ports: 
-        - name: shifumi-client
-          containerPort: 8081
+        - image: ghcr.io/vfiftyfive/shifumi-client
+          name: shifumi-client
+          ports:
+            - name: shifumi-client
+              containerPort: 8081
 ---
 apiVersion: v1
 kind: Service
@@ -29,13 +30,10 @@ metadata:
   name: shifumi-client
 spec:
   ports:
-  - name: 8081-shifumi-client
-    port: 8081
-    protocol: TCP
-    targetPort: shifumi-client
+    - name: 8081-shifumi-client
+      port: 8081
+      protocol: TCP
+      targetPort: shifumi-client
   selector:
     app: shifumi-client
   type: NodePort
-
-
-
