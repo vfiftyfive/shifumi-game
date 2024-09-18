@@ -28,6 +28,7 @@ metadata:
   labels:
     app: shifumi-client
   name: shifumi-client
+  namespace: shifumi
 spec:
   ports:
     - name: 8081-shifumi-client
