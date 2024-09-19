@@ -37,4 +37,4 @@ spec:
       targetPort: shifumi-server
   selector:
     app: shifumi-server
-  type: NodePort
+  type: ClusterIP
