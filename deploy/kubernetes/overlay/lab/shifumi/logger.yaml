@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logger
+  namespace: shifumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logger
+  template:
+    metadata:
+      labels:
+        app: logger
+    spec:
+      containers:
+        - name: logger
+          image: curlimages/curl:latest
+          command: ["/bin/sh"]
+          args:
+            [
+              "-c",
+              "while true; do curl -s http://shifumi-server:8082/stats | tee -a /var/log/stats.log; echo ''; sleep 5; done",
+            ]
+          volumeMounts:
+            - name: log-volume
+              mountPath: /var/log
+      volumes:
+        - name: log-volume
+          emptyDir: {}

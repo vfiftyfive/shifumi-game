@@ -5,6 +5,7 @@ resources:
   - kafka-broker-cm.yaml
   - namespace.yaml
   - kafka.yaml
+  - logger.yaml
 
 patches:
   - path: client.yaml
